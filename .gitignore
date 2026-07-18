@@ -1,0 +1,22 @@
+# DayZ build output
+*.pbo
+*.bisign
+*.bikey
+
+# Go
+bin/
+coverage.out
+
+# Local telemetry and databases
+*.ndjson
+*.jsonl
+*.db
+*.sqlite
+spool/
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
