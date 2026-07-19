@@ -1,0 +1,82 @@
+modded class PlayerBase
+{
+    override void EEHitBy(
+        TotalDamageResult damageResult,
+        int damageType,
+        EntityAI source,
+        int component,
+        string damageZone,
+        string ammo,
+        vector modelPosition,
+        float speedCoefficient
+    )
+    {
+        super.EEHitBy(damageResult, damageType, source, component, damageZone, ammo, modelPosition, speedCoefficient);
+
+        if (!GetGame().IsServer())
+        {
+            return;
+        }
+
+        DBAProbeCombatEvent eventData = new DBAProbeCombatEvent;
+        eventData.event_type = "PLAYER_HIT";
+        eventData.server_time_ms = GetGame().GetTime();
+        eventData.target_player_id = DBAProbePlayerIdentity.GetPlayerID(this);
+        eventData.source_player_id = DBAProbePlayerIdentity.GetRootPlayerID(source);
+        eventData.source_type = source ? source.GetType() : "";
+        eventData.damage_type = damageType;
+        eventData.component = component;
+        eventData.damage_zone = damageZone;
+        eventData.ammo = ammo;
+        eventData.model_position = modelPosition;
+        eventData.speed_coefficient = speedCoefficient;
+        DBAProbeRuntime.QueueCombatEvent(eventData);
+    }
+
+    override void EEKilled(Object killer)
+    {
+        super.EEKilled(killer);
+
+        if (!GetGame().IsServer())
+        {
+            return;
+        }
+
+        DBAProbeCombatEvent eventData = new DBAProbeCombatEvent;
+        eventData.event_type = "PLAYER_KILLED";
+        eventData.server_time_ms = GetGame().GetTime();
+        eventData.target_player_id = DBAProbePlayerIdentity.GetPlayerID(this);
+        eventData.source_player_id = DBAProbePlayerIdentity.GetRootPlayerID(killer);
+        eventData.source_type = killer ? killer.GetType() : "";
+        DBAProbeRuntime.QueueCombatEvent(eventData);
+    }
+};
+
+class DBAProbePlayerIdentity
+{
+    static string GetPlayerID(PlayerBase player)
+    {
+        if (player && player.GetIdentity())
+        {
+            return player.GetIdentity().GetId();
+        }
+        return "";
+    }
+
+    static string GetRootPlayerID(Object source)
+    {
+        if (!source)
+        {
+            return "";
+        }
+
+        EntityAI sourceEntity = EntityAI.Cast(source);
+        if (sourceEntity)
+        {
+            PlayerBase rootPlayer = PlayerBase.Cast(sourceEntity.GetHierarchyRootPlayer());
+            return GetPlayerID(rootPlayer);
+        }
+
+        return GetPlayerID(PlayerBase.Cast(source));
+    }
+};
