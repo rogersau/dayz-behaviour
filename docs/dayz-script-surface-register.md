@@ -52,7 +52,7 @@ The implementation must use a project-owned RPC ID that does not collide with va
 | `DayZPhysics.RaycastRVProxy(...)` | same | Probe variant where blocker/result details are needed |
 | `ObjIntersectView` | same | View-geometry classification |
 
-Visibility outputs are limited to `HARD_OCCLUDED`, `GEOMETRICALLY_EXPOSED` and `UNKNOWN`. They are not statements about exact rendered perception.
+Raw ray outputs are clear, hard-blocked or ambiguous per point. Derived outputs are `EXPOSED`, `HEAD_ORIGIN_OCCLUDED`, `ROBUSTLY_OCCLUDED` or `AMBIGUOUS`. `ROBUSTLY_OCCLUDED` is unavailable by default and requires a controlled first-person validation ID plus repeated-duration confirmation. These remain geometric evidence, not statements about exact rendered perception.
 
 ## Export and persistence
 
@@ -64,9 +64,11 @@ Visibility outputs are limited to `HARD_OCCLUDED`, `GEOMETRICALLY_EXPOSED` and `
 | `JsonSerializer` / `JsonFileLoader` | `scripts/3_game/tools/jsonfileloader.c` | Schema serialization/config and completed batches |
 | `TickCount(...)` | `scripts/1_core/proto/ensystem.c` | Collector performance instrumentation |
 
-## Spike-required assumptions
+## Runtime status on DayZ 1.29.0.163451
 
-The following are not considered proven until Milestone 0 runs on a dedicated server using the target DayZ version:
+PBO packing, Game/World/Mission module loading, `MissionServer.OnUpdate`, asynchronous REST success/failure, bounded spooling and end-to-end Go ingestion are verified on the target dedicated server.
+
+The following still require connected-player controlled fixtures:
 
 1. Exact client and dedicated-server execution of a modded `Weapon_Base.OnFire` override.
 2. Best object-level `OnRPC` receive seam for the required mod packaging.

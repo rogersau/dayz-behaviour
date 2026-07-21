@@ -1,6 +1,6 @@
 # Telemetry Event Schema v0
 
-This is an initial design artifact for the feasibility spike. It is not frozen until payload sizes and available DayZ serializers are measured.
+Schema version 1 is implemented. Event-specific sampling and visibility invariants are validated before durable ingestion; payload additions remain backward-compatible within the version until the controlled fixture run freezes the contract.
 
 ## Envelope
 
@@ -54,12 +54,16 @@ orientation
 alive
 unconscious
 item_in_hands_type_id
+movement_state
+movement_speed_mps
+movement_heading
+movement_transition
 ```
 
 ### Client camera samples
 
 ```text
-CAMERA_SAMPLE_BATCH
+CAMERA_SAMPLE
 ```
 
 Sample payload:
@@ -91,6 +95,8 @@ ROUTE_HEADING_CHANGED
 
 Every derived event records the source sample/snapshot references and algorithm version.
 
+Decision edges are exported as `DECISION_EDGE` with the edge name in `sampling_reason`; they remain Tier B and carry authoritative server-receive time.
+
 ### Combat
 
 ```text
@@ -109,6 +115,8 @@ VISIBILITY_OBSERVATION
 DIAGNOSTIC_PAIR_WINDOW_STARTED
 DIAGNOSTIC_PAIR_WINDOW_ENDED
 ```
+
+Visibility events also carry authority, sampling stream/policy/reason, risk-set definition, eligible counts, inclusion and admission probabilities, queue state/timing, point results, blocker categories, origin mode, validation ID and occlusion duration. `ROBUSTLY_OCCLUDED` is rejected unless the origin is validated first person and duration is positive.
 
 Visibility payload:
 

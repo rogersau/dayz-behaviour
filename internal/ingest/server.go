@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rogersau/dayz-behaviour/internal/storage"
@@ -31,10 +32,23 @@ type Config struct {
 }
 
 type Server struct {
-	config Config
-	store  BatchStore
-	logger *slog.Logger
-	mux    *http.ServeMux
+	config               Config
+	store                BatchStore
+	logger               *slog.Logger
+	mux                  *http.ServeMux
+	requests             atomic.Uint64
+	accepted             atomic.Uint64
+	duplicates           atomic.Uint64
+	rejected             atomic.Uint64
+	storageFailures      atomic.Uint64
+	authFailures         atomic.Uint64
+	decodeFailures       atomic.Uint64
+	validationFailures   atomic.Uint64
+	bytesReceived        atomic.Uint64
+	requestMicroseconds  atomic.Uint64
+	storageMicroseconds  atomic.Uint64
+	spoolFilesImported   atomic.Uint64
+	spoolBatchesImported atomic.Uint64
 }
 
 func NewServer(config Config, store BatchStore, logger *slog.Logger) (*Server, error) {
@@ -82,11 +96,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("POST /v1/telemetry/batches", s.handleBatch)
 }
 
 func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
+	started := time.Now()
+	defer func() { s.requestMicroseconds.Add(uint64(time.Since(started).Microseconds())) }()
+	s.requests.Add(1)
 	if !s.authorised(request.Header.Get("Authorization"), request.URL.Query().Get("token")) {
+		s.rejected.Add(1)
+		s.authFailures.Add(1)
 		writeError(w, http.StatusUnauthorized, "unauthorised", "valid ingest token required")
 		return
 	}
@@ -94,24 +114,33 @@ func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
 	request.Body = http.MaxBytesReader(w, request.Body, s.config.MaxRequestBytes)
 	defer request.Body.Close()
 
-	decoder := json.NewDecoder(request.Body)
+	counter := &countingReader{reader: request.Body}
+	defer func() { s.bytesReceived.Add(counter.count) }()
+	decoder := json.NewDecoder(counter)
 	decoder.DisallowUnknownFields()
 
 	var batch schema.Batch
 	if err := decoder.Decode(&batch); err != nil {
+		s.decodeFailures.Add(1)
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
+			s.rejected.Add(1)
 			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "telemetry batch exceeds configured limit")
 			return
 		}
+		s.rejected.Add(1)
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 	if err := ensureEOF(decoder); err != nil {
+		s.decodeFailures.Add(1)
+		s.rejected.Add(1)
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 	if err := batch.Validate(); err != nil {
+		s.validationFailures.Add(1)
+		s.rejected.Add(1)
 		status := http.StatusUnprocessableEntity
 		code := "invalid_batch"
 		if errors.Is(err, schema.ErrUnsupportedVersion) {
@@ -121,23 +150,71 @@ func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	if err := s.store.Put(batch); err != nil {
+	storageStarted := time.Now()
+	err := s.store.Put(batch)
+	s.storageMicroseconds.Add(uint64(time.Since(storageStarted).Microseconds()))
+	if err != nil {
 		if errors.Is(err, storage.ErrAlreadyStored) {
+			s.duplicates.Add(1)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":         "duplicate",
 				"batch_sequence": batch.BatchSequence,
 			})
 			return
 		}
+		if errors.Is(err, storage.ErrBatchConflict) {
+			s.rejected.Add(1)
+			writeError(w, http.StatusConflict, "batch_conflict", "batch identity already exists with different content")
+			return
+		}
+		s.storageFailures.Add(1)
 		s.logger.Error("store telemetry batch", "error", err, "server_id", batch.ServerID, "batch_sequence", batch.BatchSequence)
 		writeError(w, http.StatusInternalServerError, "storage_failed", "batch was not durably stored")
 		return
 	}
 
+	s.accepted.Add(1)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":         "stored",
 		"batch_sequence": batch.BatchSequence,
 	})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	_, _ = fmt.Fprintf(w, "dba_ingest_requests_total %d\n", s.requests.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_accepted_total %d\n", s.accepted.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_duplicates_total %d\n", s.duplicates.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_rejected_total %d\n", s.rejected.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_storage_failures_total %d\n", s.storageFailures.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_auth_failures_total %d\n", s.authFailures.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_decode_failures_total %d\n", s.decodeFailures.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_validation_failures_total %d\n", s.validationFailures.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_bytes_received_total %d\n", s.bytesReceived.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_request_duration_microseconds_total %d\n", s.requestMicroseconds.Load())
+	_, _ = fmt.Fprintf(w, "dba_ingest_storage_duration_microseconds_total %d\n", s.storageMicroseconds.Load())
+	_, _ = fmt.Fprintf(w, "dba_spool_files_imported_total %d\n", s.spoolFilesImported.Load())
+	_, _ = fmt.Fprintf(w, "dba_spool_batches_imported_total %d\n", s.spoolBatchesImported.Load())
+}
+
+func (s *Server) RecordSpoolImport(files, batches int) {
+	if files > 0 {
+		s.spoolFilesImported.Add(uint64(files))
+	}
+	if batches > 0 {
+		s.spoolBatchesImported.Add(uint64(batches))
+	}
+}
+
+type countingReader struct {
+	reader io.Reader
+	count  uint64
+}
+
+func (r *countingReader) Read(buffer []byte) (int, error) {
+	count, err := r.reader.Read(buffer)
+	r.count += uint64(count)
+	return count, err
 }
 
 func (s *Server) authorised(header, queryToken string) bool {

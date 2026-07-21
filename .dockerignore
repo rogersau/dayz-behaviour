@@ -1,0 +1,7 @@
+.git
+.dayz-test
+data
+dayz
+docs
+*.md
+!THIRD_PARTY_NOTICES.md

@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: dayz_behaviour
+      POSTGRES_USER: dayz_behaviour
+      POSTGRES_PASSWORD: ${DBA_POSTGRES_PASSWORD:?set DBA_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dayz_behaviour -d dayz_behaviour"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   ingestd:
     build:
       context: ..
@@ -8,11 +24,80 @@ services:
       DBA_RAW_DIR: /data/raw
       DBA_QUERY_TOKEN: ${DBA_QUERY_TOKEN:?set DBA_QUERY_TOKEN}
       DBA_MAX_REQUEST_BYTES: 2097152
+      DBA_DAYZ_SPOOL_DIR: /data/dayz-spool
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - telemetry-data:/data
     restart: unless-stopped
 
+  reviewd:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: review-runtime
+    entrypoint: ["/app/reviewd"]
+    environment:
+      DBA_REVIEW_ADDR: 0.0.0.0:8082
+      DBA_REVIEW_TOKEN: ${DBA_REVIEW_TOKEN:?set DBA_REVIEW_TOKEN}
+      DBA_PUBLIC_BASE_URL: ${DBA_PUBLIC_BASE_URL:-http://127.0.0.1:8082}
+      DBA_STEAM_ADMIN_IDS: ${DBA_STEAM_ADMIN_IDS:?set comma-separated SteamID64 admin allowlist}
+      DBA_SESSION_SECRET: ${DBA_SESSION_SECRET:?set a random secret of at least 32 characters}
+      DBA_MAP_DIR: /app/maps
+      DBA_DEFAULT_MAP: ${DBA_DEFAULT_MAP:-chernarusplus}
+      DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8082:8082"
+    restart: unless-stopped
+
+  normalize:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    entrypoint: ["/app/normalize"]
+    command: ["-raw-dir", "/data/raw", "-watch-interval", "5s"]
+    environment:
+      DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - telemetry-data:/data
+    restart: unless-stopped
+
+  analyse:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    entrypoint: ["/app/analyse"]
+    command: ["-raw-dir", "/data/raw"]
+    environment:
+      DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - telemetry-data:/data
+    profiles: ["tools"]
+
+  retention:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    entrypoint: ["/app/retention"]
+    command: ["-raw-dir", "/data/raw"]
+    environment:
+      DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - telemetry-data:/data
+    profiles: ["tools"]
+
 volumes:
   telemetry-data:
+  postgres-data:

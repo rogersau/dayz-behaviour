@@ -23,12 +23,15 @@ var (
 // Batch is the durable transport envelope sent by a DayZ server collector.
 // Client-supplied telemetry remains untrusted even after the server wraps it.
 type Batch struct {
-	SchemaVersion   int     `json:"schema_version"`
-	ServerID        string  `json:"server_id"`
-	ServerSessionID string  `json:"server_session_id"`
-	BatchSequence   uint64  `json:"batch_sequence"`
-	ServerTimeMS    int64   `json:"server_time_ms"`
-	Events          []Event `json:"events"`
+	SchemaVersion     int     `json:"schema_version"`
+	ServerID          string  `json:"server_id"`
+	ServerSessionID   string  `json:"server_session_id"`
+	BatchSequence     uint64  `json:"batch_sequence"`
+	ServerTimeMS      int64   `json:"server_time_ms"`
+	CollectorVersion  string  `json:"collector_version,omitempty"`
+	DayZBuild         string  `json:"dayz_build,omitempty"`
+	ConfigurationHash string  `json:"configuration_hash,omitempty"`
+	Events            []Event `json:"events"`
 }
 
 // Event is intentionally flexible for Milestones 0-1. Event-specific payloads
@@ -36,8 +39,14 @@ type Batch struct {
 type Event struct {
 	EventType             string          `json:"event_type"`
 	Source                EventSource     `json:"source"`
+	SourceAuthority       SourceAuthority `json:"source_authority,omitempty"`
+	SourceComponent       string          `json:"source_component,omitempty"`
+	SourceEventID         string          `json:"source_event_id,omitempty"`
+	SourceSchemaVersion   int             `json:"source_schema_version,omitempty"`
+	CollectorVersion      string          `json:"collector_version,omitempty"`
 	ServerSequence        uint64          `json:"server_sequence"`
 	ServerTimeMS          int64           `json:"server_time_ms"`
+	ServerReceiveMS       int64           `json:"server_receive_ms,omitempty"`
 	PlayerSessionID       string          `json:"player_session_id,omitempty"`
 	PlayerID              string          `json:"player_id,omitempty"`
 	ClientSequence        *uint64         `json:"client_sequence,omitempty"`
@@ -46,10 +55,14 @@ type Event struct {
 }
 
 type EventSource string
+type SourceAuthority string
 
 const (
-	SourceServer EventSource = "server"
-	SourceClient EventSource = "client_untrusted"
+	SourceServer    EventSource     = "server"
+	SourceClient    EventSource     = "client_untrusted"
+	AuthorityServer SourceAuthority = "A"
+	AuthorityClient SourceAuthority = "B"
+	AuthorityHealth SourceAuthority = "C"
 )
 
 func (b Batch) Validate() error {
@@ -86,6 +99,14 @@ func (e Event) Validate() error {
 	if e.Source != SourceServer && e.Source != SourceClient {
 		return fmt.Errorf("source must be %q or %q", SourceServer, SourceClient)
 	}
+	if e.SourceAuthority != "" {
+		if e.SourceAuthority != AuthorityServer && e.SourceAuthority != AuthorityClient && e.SourceAuthority != AuthorityHealth {
+			return fmt.Errorf("source_authority must be %q, %q or %q", AuthorityServer, AuthorityClient, AuthorityHealth)
+		}
+		if e.Source == SourceClient && e.SourceAuthority != AuthorityClient && e.SourceAuthority != AuthorityHealth {
+			return errors.New("client_untrusted events cannot claim server authority")
+		}
+	}
 	if e.ServerSequence == 0 {
 		return errors.New("server_sequence must be greater than zero")
 	}
@@ -106,6 +127,57 @@ func (e Event) Validate() error {
 	}
 	if len(e.Payload) > 0 && !json.Valid(e.Payload) {
 		return errors.New("payload must be valid JSON")
+	}
+	if e.EventType == "VISIBILITY_OBSERVATION" {
+		if e.Source != SourceServer || e.SourceAuthority != AuthorityServer {
+			return errors.New("visibility observations require Tier A server authority")
+		}
+		if err := validateVisibilityPayload(e.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateVisibilityPayload(raw json.RawMessage) error {
+	var fields map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
+		return errors.New("visibility observation requires an object payload")
+	}
+	requireString := func(key string) error {
+		value, ok := fields[key].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("visibility payload %s is required", key)
+		}
+		return nil
+	}
+	for _, key := range []string{"observer_player_id", "target_player_id", "classification", "observer_origin_mode", "sampling_stream", "sampling_policy_version", "sampling_reason", "risk_set_definition", "scheduler_load_state", "visibility_policy_version"} {
+		if err := requireString(key); err != nil {
+			return err
+		}
+	}
+	stream, _ := fields["sampling_stream"].(string)
+	if stream != "random_opportunity" && stream != "event_enrichment" {
+		return errors.New("visibility payload sampling_stream is invalid")
+	}
+	positive := func(key string) bool { value, ok := fields[key].(float64); return ok && value > 0 && value <= 1 }
+	if !positive("observer_inclusion_probability") || !positive("target_inclusion_probability") || !positive("queue_admission_probability") {
+		return errors.New("visibility inclusion and queue-admission probabilities must be in (0,1]")
+	}
+	for _, key := range []string{"observer_eligible_count", "target_eligible_count", "probe_started_ms", "probe_completed_ms"} {
+		value, ok := fields[key].(float64)
+		if !ok || value < 0 {
+			return fmt.Errorf("visibility payload %s must be non-negative", key)
+		}
+	}
+	classification, _ := fields["classification"].(string)
+	origin, _ := fields["observer_origin_mode"].(string)
+	if classification == "ROBUSTLY_OCCLUDED" {
+		validationID, _ := fields["visibility_validation_id"].(string)
+		duration, _ := fields["occlusion_duration_ms"].(float64)
+		if origin != "FIRST_PERSON_EYE" || strings.TrimSpace(validationID) == "" || duration <= 0 {
+			return errors.New("robust occlusion requires a validated first-person origin and positive duration")
+		}
 	}
 	return nil
 }

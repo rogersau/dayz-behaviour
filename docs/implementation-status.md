@@ -1,61 +1,70 @@
-# Implementation Status
+# Implementation status
 
-## Feature branch
+Status date: 2026-07-19
+Target verified build: DayZ Server 1.29.0.163451 on Windows
 
-`feature/milestone-0-foundation`
+## Current position
 
-## Implemented
+The implementation is structurally aligned with the production plan through the first operational-release architecture. A one-client diagnostic fixture now validates the client camera/RPC path and basic server lifecycle, but controlled multiplayer visibility, combat hook execution, representative load, trusted-cohort calibration and blinded-review yield still require additional connected players and labelled scenarios.
 
-### External Go service
+No ranking can trigger gameplay action. Strong hidden evidence fails closed unless a validated first-person policy ID, minimum occlusion duration, timing limits, repeated breadth, matched-model stability and negative controls all pass.
 
-- versioned telemetry batch and event schema;
-- strict request and payload validation;
-- bearer-token authentication for conventional producers;
-- query-token authentication for the DayZ `RestContext` constraint;
-- loopback-first HTTP server with health and readiness endpoints;
-- immutable, fsynced, idempotent raw batch storage;
-- graceful shutdown;
-- Docker and Compose deployment;
-- unit tests covering schema validation, authentication, idempotency and storage.
+## Implemented and automated
 
-### DayZ development probe
+### DayZ collector
 
-- adaptive local camera/state sampling from `MissionGameplay.OnUpdate`;
-- bounded primitive `ScriptRPC` batches;
-- server nonce and monotonic per-player batch validation;
-- RPC attribution from server-supplied `PlayerIdentity`;
-- authoritative player snapshots from `MissionServer.OnUpdate` and `GetGame().GetPlayers`;
-- `Weapon_Base.OnFire` execution-side instrumentation and local shot markers;
-- `PlayerBase.EEHitBy` and `PlayerBase.EEKilled` capture;
-- optional bounded head/torso `RaycastRVProxy` visibility observations;
-- asynchronous `RestContext.POST` export;
-- append-only failed-export spool.
+- adaptive local camera/readiness sampling with a pure transition detector;
+- compact decision-edge, clock-alignment and collector-health RPCs;
+- nonce, schema, sender identity, monotonic sequence/time, payload, whitelist and rate validation;
+- server-authenticated player-session lifecycle across connect, ready, respawn, reconnect and disconnect;
+- authoritative snapshots, movement state/transitions, hit and kill capture;
+- separate random-opportunity and event-enrichment queues with bounded work, admission probabilities, drop counters and queue timing;
+- adaptive head/torso/pelvis/upper-body visibility evidence and ambiguous-blocker handling;
+- safe head-origin semantics, explicit validated-first-person opt-in and minimum-duration confirmation;
+- asynchronous REST export, bounded in-memory queues, bounded rotating spool and periodic health events.
 
-## Explicitly unverified until run in DayZ
+### Go data plane
 
-The Go code has been tested locally. Enforce Script cannot be compiled in this environment, so the following remain Milestone 0 runtime checks rather than completed claims:
+- strict versioned schema and authority/sampling validation;
+- authenticated loopback-first ingestion, request limits, durable fsync-before-ack storage, conflict detection and metrics;
+- automatic DayZ spool import and deterministic replay;
+- PostgreSQL migrations, idempotent raw/event/session/sampling/visibility normalisation and analyst-facing pseudonyms;
+- independent raw, normalized and review retention; dry-run defaults; auditable durable-identity deletion;
+- deterministic golden replay fixture.
 
-- exact `DayZGame.OnRPC` behaviour for global project-owned RPC IDs with the target mod set;
-- client and dedicated-server execution contexts of `Weapon_Base.OnFire`;
-- actual callback values from `EEHitBy` and `EEKilled`;
-- head and `Spine3` positions across all stances;
-- `RaycastRVProxy` classification around terrain, doors, vehicles, base-building objects and vegetation;
-- `RestContext.POST` response behaviour and timeout handling on the target dedicated server;
-- safe sample, RPC, export and visibility-probe budgets at representative population sizes.
+### Analysis and review
 
-## Known transport constraint
+- versioned encounter, observer-target episode, refractory and prospective decision-window construction;
+- cue facts and conservative `UNEXPLAINED_IN_CAPTURED_DATA` language;
+- exact within-player context matching and conditional logistic fitting with separation suppression;
+- beta-binomial shrinkage fallback, circular permutation, pre-exposure summary, robust cohort scoring and Benjamini-Hochberg adjustment;
+- leave-one-session-out stability and negative-control fail-closed gates;
+- persistent feature results, rankings, cases, algorithm runs and dispositions;
+- authenticated review API, required endpoint aliases and filters;
+- Steam OpenID admin authentication with an explicit SteamID64 allowlist and signed, expiring browser sessions;
+- a read-only browser explorer with searchable pseudonymized sessions, authority-labelled contextual timelines, related-player context and expandable event evidence.
+- a self-contained map adapter with Chernarus, Livonia, Sakhal and Namalsk tiles, exact/coarse location semantics, selected/related routes and map/layer controls.
 
-The exposed DayZ `RestContext` API provides content-type configuration but no general arbitrary-header setter. The development probe therefore supports a URL query token loaded from the server profile and requires the Go receiver to remain bound to loopback.
+## Evidence completed locally
 
-This is acceptable for the local Milestone 0 sidecar. It is not the final design for traffic crossing a network boundary.
+- all Go tests and `go vet ./...` pass;
+- Docker image and Compose configuration build successfully;
+- PostgreSQL migrations and replay are idempotent on PostgreSQL 17;
+- the PBO packs and all Game, World and Mission modules compile/load on DayZ 1.29;
+- a matched DayZDiag client/server run passed the automated client check: nonce receipt, camera sampling and authenticated sample-batch acceptance;
+- the one-client run exercised connect, new-character ready and disconnect lifecycle events plus clock alignment, decision edges, client health and authoritative snapshots;
+- authenticated DayZ-to-Go export persisted 1,389 normalized development events across 520 immutable batches, with the admin explorer reading the resulting sessions;
+- receiver-down testing produced a bounded spool file and automatic import archived it after durable storage;
+- persistent review API returned health, candidates and a completed algorithm run.
 
-## Not implemented yet
+## Runtime evidence still required
 
-- automatic replay of DayZ spool files;
-- PostgreSQL normalisation;
-- timeline and engagement reconstruction;
-- matched controls and behavioural feature calculation;
-- squad analysis;
-- review API or dashboard;
-- production visibility scheduler and cooldowns;
-- automatic enforcement of any kind.
+These are evidence gates, not hidden claims of completion:
+
+1. Add a second instrumented client and verify remote-entity behavior, raised/ADS/optics transitions, `OnFire`, respawn/reconnect, hit and kill paths. The one-client camera, RPC and connect/new-ready/disconnect paths are validated.
+2. Run labelled first- and third-person visibility fixtures across stance, geometry, motion and blocker classes; issue a validation ID only if the false-occlusion limit passes.
+3. Measure clock uncertainty, edge-to-receive latency, decision windows and safe sampling/probe budgets under representative population.
+4. Run silent trusted-player calibration, controlled information interventions, all position/identity/sector negative controls and held-out stability.
+5. Demonstrate operator-approved gameplay tolerance, false-priority tolerance, blinded-review yield and lift over random selection.
+
+Until those gates pass, the system can collect and analyse development data but must not be presented as a production-capable detector.

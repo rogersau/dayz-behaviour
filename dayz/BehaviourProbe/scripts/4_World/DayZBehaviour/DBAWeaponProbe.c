@@ -1,8 +1,8 @@
 modded class Weapon_Base
 {
-    override void OnFire(int muzzleIndex)
+    override void OnFire(int muzzle_index)
     {
-        super.OnFire(muzzleIndex);
+        super.OnFire(muzzle_index);
 
         PlayerBase owner = PlayerBase.Cast(GetHierarchyRootPlayer());
         string ownerID = "";
@@ -11,18 +11,16 @@ modded class Weapon_Base
             ownerID = owner.GetIdentity().GetId();
         }
 
-        Print(string.Format(
-            "[DayZBehaviourProbe] Weapon_Base.OnFire side server=%1 dedicated=%2 owner=%3 weapon=%4 muzzle=%5",
-            GetGame().IsServer(),
-            GetGame().IsDedicatedServer(),
-            ownerID,
-            GetType(),
-            muzzleIndex
-        ));
+        string message = "[DayZBehaviourProbe] Weapon_Base.OnFire side server=" + GetGame().IsServer().ToString();
+        message += " dedicated=" + GetGame().IsDedicatedServer().ToString();
+        message += " owner=" + ownerID;
+        message += " weapon=" + GetType();
+        message += " muzzle=" + muzzle_index.ToString();
+        Print(message);
 
         if (!GetGame().IsDedicatedServer() && owner && owner == GetGame().GetPlayer())
         {
-            DBAProbeRuntime.MarkLocalShot(muzzleIndex);
+            DBAProbeRuntime.MarkLocalShot(muzzle_index);
         }
     }
 };

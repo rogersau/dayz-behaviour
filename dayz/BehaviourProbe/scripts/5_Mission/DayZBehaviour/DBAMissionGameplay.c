@@ -4,8 +4,14 @@ modded class MissionGameplay
     protected float m_DBAProbeBatchAccumulator;
     protected int m_DBAProbeClientSequence;
     protected int m_DBAProbeBatchSequence;
+    protected int m_DBAProbeEdgeSequence;
     protected int m_DBAProbeDroppedSamples;
+    protected int m_DBAProbeSamplesCaptured;
+    protected int m_DBAProbeBatchesAttempted;
+    protected int m_DBAProbeEdgesAttempted;
+    protected int m_DBAProbeLastHealthMS;
     protected ref array<ref DBAClientSample> m_DBAProbeSamples = new array<ref DBAClientSample>;
+    protected ref DBAClientTransitionDetector m_DBAProbeTransitionDetector = new DBAClientTransitionDetector;
 
     override void OnUpdate(float timeslice)
     {
@@ -40,11 +46,13 @@ modded class MissionGameplay
             m_DBAProbeBatchAccumulator = 0;
             SendDBAProbeBatch();
         }
+        SendDBAProbeHealth();
     }
 
     protected void CaptureDBAProbeSample(PlayerBase player)
     {
         DBAClientSample sample = new DBAClientSample;
+        m_DBAProbeSamplesCaptured++;
         sample.client_sequence = ++m_DBAProbeClientSequence;
         sample.client_monotonic_time_ms = GetGame().GetTime();
         sample.camera_position = GetGame().GetCurrentCameraPosition();
@@ -54,6 +62,11 @@ modded class MissionGameplay
         sample.is_in_ironsights = player.IsInIronsights();
         sample.is_in_optics = player.IsInOptics();
         sample.is_in_third_person = player.IsInThirdPerson();
+        sample.sample_mode = "baseline";
+        if (sample.is_weapon_raised || sample.is_in_ironsights || sample.is_in_optics)
+        {
+            sample.sample_mode = "ready";
+        }
 
         EntityAI itemInHands = player.GetItemInHands();
         if (itemInHands)
@@ -63,12 +76,41 @@ modded class MissionGameplay
 
         DBAProbeRuntime.ConsumeLocalShot(sample.local_shot_count, sample.local_shot_muzzle_index);
 
+        array<string> transitions = new array<string>;
+        m_DBAProbeTransitionDetector.Process(sample, transitions);
+        foreach (string transition : transitions)
+        {
+            if (transition == "WEAPON_RAISED" || transition == "ADS_ENTERED" || transition == "OPTICS_ENTERED" || transition == "DELIBERATE_CAMERA_TURN" || transition == "SHOT_FIRED_CLIENT")
+            {
+                SendDBADecisionEdge(transition, sample.client_monotonic_time_ms, sample.camera_direction);
+            }
+        }
+
         if (m_DBAProbeSamples.Count() >= DBAProbeConstants.MAX_CLIENT_SAMPLES_PER_BATCH)
         {
             m_DBAProbeSamples.RemoveOrdered(0);
             m_DBAProbeDroppedSamples++;
         }
         m_DBAProbeSamples.Insert(sample);
+    }
+
+    protected void SendDBADecisionEdge(string edgeType, int clientTimeMS, vector cameraDirection)
+    {
+        string nonce = DBAProbeRuntime.GetClientNonce();
+        if (nonce == "")
+        {
+            return;
+        }
+
+        ScriptRPC rpc = new ScriptRPC;
+        m_DBAProbeEdgesAttempted++;
+        rpc.Write(DBAProbeConstants.SCHEMA_VERSION);
+        rpc.Write(nonce);
+        rpc.Write(++m_DBAProbeEdgeSequence);
+        rpc.Write(clientTimeMS);
+        rpc.Write(edgeType);
+        rpc.Write(cameraDirection);
+        rpc.Send(null, DBAProbeConstants.RPC_DECISION_EDGE, true, null);
     }
 
     protected void SendDBAProbeBatch()
@@ -80,6 +122,7 @@ modded class MissionGameplay
         }
 
         ScriptRPC rpc = new ScriptRPC;
+        m_DBAProbeBatchesAttempted++;
         rpc.Write(DBAProbeConstants.SCHEMA_VERSION);
         rpc.Write(nonce);
         rpc.Write(++m_DBAProbeBatchSequence);
@@ -97,11 +140,32 @@ modded class MissionGameplay
             rpc.Write(sample.is_in_optics);
             rpc.Write(sample.is_in_third_person);
             rpc.Write(sample.item_in_hands_type_id);
+            rpc.Write(sample.sample_mode);
             rpc.Write(sample.local_shot_count);
             rpc.Write(sample.local_shot_muzzle_index);
         }
 
         rpc.Send(null, DBAProbeConstants.RPC_CLIENT_SAMPLE_BATCH, true, null);
         m_DBAProbeSamples.Clear();
+    }
+
+    protected void SendDBAProbeHealth()
+    {
+        int nowMS = GetGame().GetTime();
+        string nonce = DBAProbeRuntime.GetClientNonce();
+        if (nonce == "" || nowMS - m_DBAProbeLastHealthMS < 30000)
+        {
+            return;
+        }
+        m_DBAProbeLastHealthMS = nowMS;
+        ScriptRPC rpc = new ScriptRPC;
+        rpc.Write(DBAProbeConstants.SCHEMA_VERSION);
+        rpc.Write(nonce);
+        rpc.Write(m_DBAProbeSamplesCaptured);
+        rpc.Write(m_DBAProbeBatchesAttempted);
+        rpc.Write(m_DBAProbeEdgesAttempted);
+        rpc.Write(m_DBAProbeDroppedSamples);
+        rpc.Write(m_DBAProbeSamples.Count());
+        rpc.Send(null, DBAProbeConstants.RPC_CLIENT_HEALTH, true, null);
     }
 };

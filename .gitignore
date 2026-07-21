@@ -2,12 +2,14 @@
 *.pbo
 *.bisign
 *.bikey
+.dayz-test/
 
 # Go
 bin/
 coverage.out
 
 # Local telemetry and databases
+.env
 *.ndjson
 *.jsonl
 *.db

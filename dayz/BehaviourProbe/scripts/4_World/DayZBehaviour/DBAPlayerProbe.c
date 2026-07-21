@@ -5,13 +5,13 @@ modded class PlayerBase
         int damageType,
         EntityAI source,
         int component,
-        string damageZone,
+        string dmgZone,
         string ammo,
-        vector modelPosition,
-        float speedCoefficient
+        vector modelPos,
+        float speedCoef
     )
     {
-        super.EEHitBy(damageResult, damageType, source, component, damageZone, ammo, modelPosition, speedCoefficient);
+        super.EEHitBy(damageResult, damageType, source, component, dmgZone, ammo, modelPos, speedCoef);
 
         if (!GetGame().IsServer())
         {
@@ -23,13 +23,16 @@ modded class PlayerBase
         eventData.server_time_ms = GetGame().GetTime();
         eventData.target_player_id = DBAProbePlayerIdentity.GetPlayerID(this);
         eventData.source_player_id = DBAProbePlayerIdentity.GetRootPlayerID(source);
-        eventData.source_type = source ? source.GetType() : "";
+        if (source)
+        {
+            eventData.source_type = source.GetType();
+        }
         eventData.damage_type = damageType;
         eventData.component = component;
-        eventData.damage_zone = damageZone;
+        eventData.damage_zone = dmgZone;
         eventData.ammo = ammo;
-        eventData.model_position = modelPosition;
-        eventData.speed_coefficient = speedCoefficient;
+        eventData.model_position = modelPos;
+        eventData.speed_coefficient = speedCoef;
         DBAProbeRuntime.QueueCombatEvent(eventData);
     }
 
@@ -47,7 +50,10 @@ modded class PlayerBase
         eventData.server_time_ms = GetGame().GetTime();
         eventData.target_player_id = DBAProbePlayerIdentity.GetPlayerID(this);
         eventData.source_player_id = DBAProbePlayerIdentity.GetRootPlayerID(killer);
-        eventData.source_type = killer ? killer.GetType() : "";
+        if (killer)
+        {
+            eventData.source_type = killer.GetType();
+        }
         DBAProbeRuntime.QueueCombatEvent(eventData);
     }
 };

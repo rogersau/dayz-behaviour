@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rogersau/dayz-behaviour/internal/ingest"
@@ -97,6 +98,48 @@ func TestIngestRejectsInvalidBatch(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusUnprocessableEntity, response.Body.String())
+	}
+}
+
+func TestIngestRejectsConflictingDuplicate(t *testing.T) {
+	store, err := storage.NewRawStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := ingest.NewServer(ingest.Config{}, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := validBatch()
+	for index, expected := range []int{http.StatusAccepted, http.StatusConflict} {
+		if index == 1 {
+			batch.ServerTimeMS++
+		}
+		request := httptest.NewRequest(http.MethodPost, "/v1/telemetry/batches", bytes.NewReader(marshalBatch(t, batch)))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != expected {
+			t.Fatalf("request %d status = %d, want %d", index, response.Code, expected)
+		}
+	}
+}
+
+func TestMetricsExposeIngestOutcomes(t *testing.T) {
+	store, err := storage.NewRawStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := ingest.NewServer(ingest.Config{}, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/telemetry/batches", bytes.NewReader(marshalBatch(t, validBatch())))
+	server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "dba_ingest_accepted_total 1") {
+		t.Fatalf("metrics response = %d %q", response.Code, response.Body.String())
 	}
 }
 

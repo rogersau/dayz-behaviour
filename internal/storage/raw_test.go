@@ -26,6 +26,21 @@ func TestRawStorePutAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestRawStoreRejectsConflictingDuplicate(t *testing.T) {
+	store, err := storage.NewRawStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := validBatch()
+	if err := store.Put(batch); err != nil {
+		t.Fatal(err)
+	}
+	batch.ServerTimeMS++
+	if err := store.Put(batch); !errors.Is(err, storage.ErrBatchConflict) {
+		t.Fatalf("Put conflict error = %v, want ErrBatchConflict", err)
+	}
+}
+
 func TestRawStoreSanitisesPathIdentifiers(t *testing.T) {
 	root := t.TempDir()
 	store, err := storage.NewRawStore(root)

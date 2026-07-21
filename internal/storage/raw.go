@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sync"
 
 	"github.com/rogersau/dayz-behaviour/pkg/schema"
@@ -14,6 +16,7 @@ import (
 
 var (
 	ErrAlreadyStored = errors.New("telemetry batch already stored")
+	ErrBatchConflict = errors.New("telemetry batch id conflicts with different content")
 	safePathPart     = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 )
 
@@ -54,7 +57,14 @@ func (s *RawStore) Put(batch schema.Batch) error {
 
 	finalPath := filepath.Join(dir, fmt.Sprintf("%020d.json", batch.BatchSequence))
 	if _, err := os.Stat(finalPath); err == nil {
-		return ErrAlreadyStored
+		existing, readErr := os.ReadFile(finalPath)
+		if readErr != nil {
+			return fmt.Errorf("read existing batch: %w", readErr)
+		}
+		if bytes.Equal(bytes.TrimSpace(existing), data) {
+			return ErrAlreadyStored
+		}
+		return ErrBatchConflict
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat batch path: %w", err)
 	}
@@ -89,7 +99,11 @@ func (s *RawStore) Put(batch schema.Batch) error {
 	}
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		if _, statErr := os.Stat(finalPath); statErr == nil {
-			return ErrAlreadyStored
+			existing, readErr := os.ReadFile(finalPath)
+			if readErr == nil && bytes.Equal(bytes.TrimSpace(existing), data) {
+				return ErrAlreadyStored
+			}
+			return ErrBatchConflict
 		}
 		return fmt.Errorf("commit telemetry batch: %w", err)
 	}
@@ -110,6 +124,14 @@ func sanitise(value string) string {
 }
 
 func syncDirectory(path string) error {
+	// Windows does not allow os.Open on a directory to be flushed with
+	// File.Sync. The batch file itself has already been fsynced and atomically
+	// renamed at this point; directory fsync is an additional durability step
+	// available on Unix filesystems.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	dir, err := os.Open(path)
 	if err != nil {
 		return err

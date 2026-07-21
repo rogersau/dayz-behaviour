@@ -1,54 +1,69 @@
 # DayZ Behaviour
 
-Behavioural telemetry and review-prioritisation tooling for identifying repeated hidden-awareness patterns in DayZ.
+Behavioural telemetry and conservative review-prioritisation tooling for repeated hidden-awareness patterns in DayZ. It supports manual review only; it does not decide cheating or trigger bans, kicks or gameplay action.
 
-This project is designed for manual review support only. It does not make authoritative cheat or ban decisions.
+## Status
 
-## Current status
+The collector, durable data plane, replay/normalisation, core analysis and persistent review API are implemented. The mod packs and loads on DayZ Server 1.29.0.163451, and authenticated live export plus outage spool recovery have been exercised.
 
-Milestone 0 is in progress. The first implementation slice contains:
+Production readiness is intentionally blocked on connected-player capability fixtures, controlled visibility validation, representative load, trusted-cohort calibration, negative controls and blinded-review yield. See [implementation status](docs/implementation-status.md) and the [capability matrix](docs/capability-matrix.md).
 
-- a Go telemetry ingestion service with versioned validation, authentication, durable raw storage and idempotent replay inputs;
-- a development-only DayZ client/server probe for validating camera sampling, RPC attribution, authoritative snapshots, combat callbacks, visibility raycasts and asynchronous export;
-- explicit documentation of which DayZ surfaces are implemented versus still requiring dedicated-server verification.
+## Test and run locally
 
-See:
+Go may need to be addressed by its full path on Windows if it is not yet in the current shell's `PATH`.
 
-- [Specification](docs/behavioural-awareness-spec.md)
-- [DayZ script surface register](docs/dayz-script-surface-register.md)
-- [Milestone 0 spike](docs/milestone-0-spike.md)
-- [Implementation status](docs/implementation-status.md)
-- [Issue #1](https://github.com/rogersau/dayz-behaviour/issues/1)
-
-## Run the Go receiver
-
-```bash
+```powershell
 go test ./...
 go vet ./...
 
-export DBA_QUERY_TOKEN='replace-with-a-long-random-token'
+$env:DBA_QUERY_TOKEN = 'replace-with-a-long-random-token'
 go run ./cmd/ingestd
 ```
 
-The receiver listens on `127.0.0.1:8080` by default and durably stores accepted raw batches under `./data/raw`.
+The receiver binds to `127.0.0.1:8080` and stores fsynced raw batches under `./data/raw` by default. Authentication is mandatory unless `DBA_ALLOW_UNAUTHENTICATED_LOCAL=true` is explicitly set for development.
 
-Docker Compose is also available:
+## Full local stack
 
-```bash
-export DBA_QUERY_TOKEN='replace-with-a-long-random-token'
-docker compose -f deploy/compose.yaml up --build
+```powershell
+$env:DBA_POSTGRES_PASSWORD = 'replace-with-a-long-random-password'
+$env:DBA_QUERY_TOKEN = 'replace-with-a-long-random-ingest-token'
+$env:DBA_REVIEW_TOKEN = 'replace-with-a-long-random-review-token'
+$env:DBA_STEAM_ADMIN_IDS = '76561198000000000' # comma-separated SteamID64 allowlist
+$env:DBA_SESSION_SECRET = 'replace-with-at-least-32-random-characters'
+$env:DBA_PUBLIC_BASE_URL = 'http://127.0.0.1:8082'
+docker compose -f deploy/compose.yaml up --build postgres ingestd reviewd
 ```
 
-## Run the DayZ feasibility probe
+Normalize and analyse immutable raw data:
 
-The development mod source is under [`dayz/BehaviourProbe`](dayz/BehaviourProbe).
-
-Pack and load it on both the client and dedicated server used for the Milestone 0 spike. On first launch it creates:
-
-```text
-$profile:DayZBehaviourProbe/config.json
+```powershell
+go run ./cmd/normalize -raw-dir ./data/raw
+go run ./cmd/analyse -raw-dir ./data/raw
 ```
 
-Configure the loopback receiver endpoint, server identifier and the same query token used by the Go receiver. Visibility probes are disabled by default and should initially be enabled only in controlled fixtures.
+The admin explorer is served at `http://127.0.0.1:8082/`. Browser users sign in through Steam and are admitted only when their verified SteamID64 is in `DBA_STEAM_ADMIN_IDS`. The UI provides searchable pseudonymized sessions, a filterable context timeline and a self-contained route/location map. The review image includes only level-4 Chernarus, Livonia, Sakhal and Namalsk assets selected from DZMap; no second map container runs. Compose continuously normalizes new immutable batches, and its `telemetry-data` and `postgres-data` volumes survive ordinary container restarts and `docker compose down`. Do not use `docker compose down -v` unless the captured dataset is intentionally being erased. API clients can continue to use `Authorization: Bearer <DBA_REVIEW_TOKEN>`.
 
-The Enforce Script code has not yet been compiled or executed against a DayZ dedicated server. Treat it as a feasibility probe until the checks in `docs/milestone-0-spike.md` pass.
+For a reverse-proxied deployment, set `DBA_PUBLIC_BASE_URL` to the exact externally visible HTTPS origin. Steam OpenID callback URLs and secure-cookie behaviour are derived from it. See [admin explorer operations](docs/admin-explorer.md).
+
+Retention and identity deletion default to report-only operation:
+
+```powershell
+go run ./cmd/retention -raw-dir ./data/raw
+go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-id>'
+```
+
+Add `-execute` only after reviewing the reported scope. Executed identity deletion also requires `-actor`, `-reason` and PostgreSQL configuration and writes a pseudonymous audit record.
+
+## DayZ mod
+
+Source is under `dayz/BehaviourProbe`. Pack and load it on both client and dedicated server. First launch creates `$profile:DayZBehaviourProbe/config.json`; configure the loopback endpoint and the same ingest token.
+
+Visibility probes are disabled by default. Keep `visibility_origin_mode` as `PLAYER_HEAD_APPROXIMATION` until a controlled first-person matrix passes. Do not set `FIRST_PERSON_EYE` or a validation ID merely to obtain strong labels.
+
+## Design references
+
+- [Implementation plan](docs/behavioural-awareness-implementation-plan.md)
+- [Specification](docs/behavioural-awareness-spec.md)
+- [Implementation inventory](docs/implementation-inventory.md)
+- [Sampling and latency report](docs/sampling-and-latency-report.md)
+- [DayZ script surface register](docs/dayz-script-surface-register.md)

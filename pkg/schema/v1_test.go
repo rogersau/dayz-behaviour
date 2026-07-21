@@ -44,3 +44,32 @@ func TestClientEventRequiresSequence(t *testing.T) {
 		t.Fatal("Validate returned nil, want error")
 	}
 }
+
+func TestClientEventCannotClaimServerAuthority(t *testing.T) {
+	sequence := uint64(1)
+	event := schema.Event{
+		EventType:       "CAMERA_SAMPLE",
+		Source:          schema.SourceClient,
+		SourceAuthority: schema.AuthorityServer,
+		ServerSequence:  1,
+		ServerTimeMS:    1,
+		ClientSequence:  &sequence,
+	}
+	if err := event.Validate(); err == nil {
+		t.Fatal("Validate returned nil, want authority error")
+	}
+}
+
+func TestVisibilityObservationRequiresSamplingPolicyMetadata(t *testing.T) {
+	event := schema.Event{
+		EventType:       "VISIBILITY_OBSERVATION",
+		Source:          schema.SourceServer,
+		SourceAuthority: schema.AuthorityServer,
+		ServerSequence:  1,
+		ServerTimeMS:    1,
+		Payload:         json.RawMessage(`{"classification":"ROBUSTLY_OCCLUDED"}`),
+	}
+	if err := event.Validate(); err == nil {
+		t.Fatal("Validate returned nil, want missing sampling metadata error")
+	}
+}

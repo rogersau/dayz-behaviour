@@ -36,7 +36,7 @@ class DBAProbeExporter
 {
     protected ref DBAProbeServerConfig m_Config;
     protected string m_ServerSessionID;
-    protected ref array<string> m_PendingEvents = new array<string>;
+    protected ref array<ref DBAProbeWireEvent> m_PendingEvents = new array<ref DBAProbeWireEvent>;
     protected int m_BatchSequence;
     protected int m_DroppedEvents;
     protected int m_LastFlushTimeMS;
@@ -44,6 +44,12 @@ class DBAProbeExporter
     protected string m_InFlightPayload;
     protected RestContext m_RestContext;
     protected ref DBAProbeExportCallback m_Callback;
+    protected int m_SpoolSlot;
+    protected int m_SpoolBatchCount;
+    protected bool m_SpoolInitialized;
+    protected int m_ExportSuccessCount;
+    protected int m_ExportFailureCount;
+    protected int m_SpoolOverwriteCount;
 
     void DBAProbeExporter(DBAProbeServerConfig config, string serverSessionID)
     {
@@ -69,14 +75,18 @@ class DBAProbeExporter
         }
     }
 
-    void QueueEvent(string eventJson)
+    void QueueEvent(DBAProbeWireEvent eventData)
     {
+        if (!eventData)
+        {
+            return;
+        }
         if (m_PendingEvents.Count() >= m_Config.max_pending_events)
         {
             m_PendingEvents.RemoveOrdered(0);
             m_DroppedEvents++;
         }
-        m_PendingEvents.Insert(eventJson);
+        m_PendingEvents.Insert(eventData);
     }
 
     int GetDroppedEvents()
@@ -88,6 +98,10 @@ class DBAProbeExporter
     {
         return m_PendingEvents.Count();
     }
+
+    int GetExportSuccessCount() { return m_ExportSuccessCount; }
+    int GetExportFailureCount() { return m_ExportFailureCount; }
+    int GetSpoolOverwriteCount() { return m_SpoolOverwriteCount; }
 
     void Update(int nowMS)
     {
@@ -112,29 +126,33 @@ class DBAProbeExporter
         }
 
         int eventCount = Math.Min(m_Config.max_events_per_export, m_PendingEvents.Count());
-        string eventsJson = "";
+        DBAProbeWireBatch batch = new DBAProbeWireBatch;
+        batch.schema_version = DBAProbeConstants.SCHEMA_VERSION;
+        batch.server_id = m_Config.server_id;
+        batch.server_session_id = m_ServerSessionID;
+        batch.batch_sequence = ++m_BatchSequence;
+        batch.server_time_ms = nowMS;
+        batch.collector_version = "milestone-0.1";
+        batch.dayz_build = "1.29.0.163451";
+        batch.configuration_hash = m_Config.configuration_hash;
+
         for (int index = 0; index < eventCount; index++)
         {
-            if (index > 0)
-            {
-                eventsJson += ",";
-            }
-            eventsJson += m_PendingEvents.Get(index);
+            batch.events.Insert(m_PendingEvents.Get(index));
         }
         for (index = 0; index < eventCount; index++)
         {
             m_PendingEvents.RemoveOrdered(0);
         }
 
-        m_BatchSequence++;
-        m_InFlightPayload = "{"
-            + "\"schema_version\":" + DBAProbeConstants.SCHEMA_VERSION.ToString() + ","
-            + "\"server_id\":" + DBAProbeJson.Quote(m_Config.server_id) + ","
-            + "\"server_session_id\":" + DBAProbeJson.Quote(m_ServerSessionID) + ","
-            + "\"batch_sequence\":" + m_BatchSequence.ToString() + ","
-            + "\"server_time_ms\":" + nowMS.ToString() + ","
-            + "\"events\":[" + eventsJson + "]"
-            + "}";
+        JsonSerializer serializer = new JsonSerializer;
+        if (!serializer.WriteToString(batch, false, m_InFlightPayload))
+        {
+            m_DroppedEvents += eventCount;
+            m_InFlightPayload = "";
+            Print("[DayZBehaviourProbe] failed to serialize export batch");
+            return;
+        }
 
         if (!m_RestContext)
         {
@@ -161,12 +179,14 @@ class DBAProbeExporter
 
     void OnExportSucceeded()
     {
+        m_ExportSuccessCount++;
         m_RequestInFlight = false;
         m_InFlightPayload = "";
     }
 
     void OnExportFailed(string reason)
     {
+        m_ExportFailureCount++;
         m_RequestInFlight = false;
         Spool(m_InFlightPayload, reason);
         m_InFlightPayload = "";
@@ -179,8 +199,29 @@ class DBAProbeExporter
             return;
         }
 
-        string path = "$profile:DayZBehaviourProbe/spool/failed-batches.ndjson";
-        FileHandle handle = OpenFile(path, FileMode.APPEND);
+        if (m_Config.max_spool_files < 1 || m_Config.max_spool_batches_per_file < 1)
+        {
+            Print("[DayZBehaviourProbe] spool disabled by invalid bounds; reason=" + reason);
+            return;
+        }
+        if (m_SpoolBatchCount >= m_Config.max_spool_batches_per_file)
+        {
+            m_SpoolSlot = (m_SpoolSlot + 1) % m_Config.max_spool_files;
+            m_SpoolBatchCount = 0;
+            m_SpoolInitialized = false;
+            if (m_SpoolSlot == 0)
+            {
+                m_SpoolOverwriteCount++;
+            }
+        }
+
+        string path = "$profile:DayZBehaviourProbe/spool/failed-batches-" + m_SpoolSlot.ToString() + ".ndjson";
+        int mode = FileMode.APPEND;
+        if (!m_SpoolInitialized)
+        {
+            mode = FileMode.WRITE;
+        }
+        FileHandle handle = OpenFile(path, mode);
         if (handle == 0)
         {
             Print("[DayZBehaviourProbe] failed to open spool file; reason=" + reason);
@@ -189,6 +230,8 @@ class DBAProbeExporter
 
         FPrint(handle, payload + "\n");
         CloseFile(handle);
+        m_SpoolInitialized = true;
+        m_SpoolBatchCount++;
         Print("[DayZBehaviourProbe] spooled failed export; reason=" + reason);
     }
 };

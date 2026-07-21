@@ -1,0 +1,26 @@
+[
+  {
+    "name": "chernarusplus",
+    "size": 15360,
+    "zoom": 4,
+    "attribution": "Tiles © Xam.nu"
+  },
+  {
+    "name": "enoch",
+    "size": 12800,
+    "zoom": 4,
+    "attribution": "Tiles © Xam.nu"
+  },
+  {
+    "name": "sakhal",
+    "size": 15360,
+    "zoom": 4,
+    "attribution": "Tiles © Xam.nu"
+  },
+  {
+    "name": "namalsk",
+    "size": 12800,
+    "zoom": 4,
+    "attribution": "Tiles © Xam.nu"
+  }
+]

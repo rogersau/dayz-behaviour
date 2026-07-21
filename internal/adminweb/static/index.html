@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DayZ Behaviour Explorer</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/map.css">
+</head>
+<body>
+  <section id="login" class="login hidden">
+    <div class="login-card">
+      <div class="mark">DB</div>
+      <p class="eyebrow">ADMIN REVIEW</p>
+      <h1>Behaviour Explorer</h1>
+      <p>Explore pseudonymized server evidence in context. Findings support manual review; they are not proof of cheating.</p>
+      <a class="steam-button" href="/auth/steam/login">Sign in through Steam</a>
+    </div>
+  </section>
+
+  <div id="app" class="shell hidden">
+    <header class="topbar">
+      <div><span class="mark small">DB</span><strong>Behaviour Explorer</strong></div>
+      <div class="account"><span id="steam-id"></span><button id="logout" class="quiet">Sign out</button></div>
+    </header>
+    <aside class="sidebar">
+      <div class="sidebar-heading"><div><p class="eyebrow">PLAYER SESSIONS</p><span id="session-count">0 sessions</span></div><button id="refresh" class="icon" title="Refresh">↻</button></div>
+      <label class="search"><span>⌕</span><input id="session-search" placeholder="Search pseudonym or server" autocomplete="off"></label>
+      <div id="sessions" class="sessions"></div>
+    </aside>
+    <main class="main">
+      <section id="empty" class="empty">
+        <div class="empty-icon">⌁</div><h2>Select a player session</h2><p>Choose a session to reconstruct its telemetry and surrounding visibility context.</p>
+      </section>
+      <section id="workspace" class="hidden">
+        <div class="title-row">
+          <div><p class="eyebrow">TIMELINE CONTEXT</p><h1 id="session-title"></h1><p id="session-meta" class="muted"></p></div>
+          <span id="live-status" class="status"></span>
+        </div>
+        <div class="stats">
+          <div><span>Events loaded</span><strong id="stat-events">—</strong></div>
+          <div><span>Session duration</span><strong id="stat-duration">—</strong></div>
+          <div><span>Tier A evidence</span><strong id="stat-authority">—</strong></div>
+          <div><span>Related players</span><strong id="stat-related">—</strong></div>
+        </div>
+        <section id="map-panel" class="map-panel hidden">
+          <div class="map-toolbar">
+            <div><p class="eyebrow">SPATIAL CONTEXT</p><span id="map-status" class="muted">Loading map…</span></div>
+            <label>Map<select id="map-select"></select></label>
+            <label>Layer<select id="map-layer"><option value="topographic">Topographic</option><option value="satellite">Satellite</option></select></label>
+            <div class="map-buttons"><button id="map-fit" title="Fit route">Fit</button><button id="map-out" title="Zoom out">−</button><button id="map-in" title="Zoom in">+</button></div>
+          </div>
+          <div class="map-stage"><canvas id="map-canvas" aria-label="Player locations and route on the DayZ map"></canvas><div class="map-legend"><span><i class="primary-dot"></i>Selected player</span><span><i class="related-dot"></i>Related context</span><span><i class="coarse-dot"></i>Coarse 100 m cell</span></div></div>
+          <p id="map-attribution" class="map-attribution"></p>
+        </section>
+        <div class="controls">
+          <label>Event type<select id="event-filter"><option value="">All events</option></select></label>
+          <label>Find in context<input id="event-search" placeholder="event, target, detail…"></label>
+          <label class="toggle"><input id="context-toggle" type="checkbox" checked><span>Include related-player context</span></label>
+        </div>
+        <div id="notice" class="notice hidden"></div>
+        <div id="timeline" class="timeline"></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/assets/map.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
