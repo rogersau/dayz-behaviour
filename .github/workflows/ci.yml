@@ -18,15 +18,57 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Check formatting
-        run: test -z "$(gofmt -l ./cmd ./internal ./pkg)"
+        id: formatting
+        continue-on-error: true
+        run: |
+          gofmt -w ./cmd ./internal ./pkg
+          git diff --binary > gofmt.patch
+          changed_go_files="$(git diff --name-only --diff-filter=ACM -- '*.go')"
+          if [ -n "$changed_go_files" ]; then
+            tar -czf gofmt-source.tar.gz $changed_go_files
+          fi
+          test ! -s gofmt.patch
+      - name: Upload formatting patch
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gofmt-patch
+          path: |
+            gofmt.patch
+            gofmt-source.tar.gz
+      - name: Fail after formatting patch upload
+        if: steps.formatting.outcome == 'failure'
+        run: exit 1
       - name: Test schema packages
         run: go test ./pkg/...
       - name: Test internal packages
-        run: go test ./internal/...
+        id: internal-tests
+        continue-on-error: true
+        run: go test ./internal/... > internal-tests.log 2>&1
+      - name: Upload internal test failure log
+        if: steps.internal-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-tests-log
+          path: internal-tests.log
+      - name: Fail after internal test log upload
+        if: steps.internal-tests.outcome == 'failure'
+        run: exit 1
       - name: Compile analyse command
         run: go test ./cmd/analyse
       - name: Compile ingestd command
-        run: go test ./cmd/ingestd
+        id: ingestd
+        continue-on-error: true
+        run: go test ./cmd/ingestd > ingestd-test.log 2>&1
+      - name: Upload ingestd failure log
+        if: steps.ingestd.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestd-test-log
+          path: ingestd-test.log
+      - name: Fail after ingestd log upload
+        if: steps.ingestd.outcome == 'failure'
+        run: exit 1
       - name: Compile normalize command
         run: go test ./cmd/normalize
       - name: Compile privacy-delete command
