@@ -355,6 +355,8 @@ class DBAProbeRuntime
     protected static ref map<string, int> s_EdgeCountByPlayer = new map<string, int>;
     protected static ref map<string, int> s_BatchWindowStartByPlayer = new map<string, int>;
     protected static ref map<string, int> s_BatchCountByPlayer = new map<string, int>;
+    protected static ref map<string, float> s_LatestClockOffsetByPlayer = new map<string, float>;
+    protected static ref map<string, float> s_LatestClockUncertaintyByPlayer = new map<string, float>;
     protected static int s_AcceptedClientRPCCount;
     protected static int s_RejectedClientRPCCount;
     protected static bool s_DiagClientTestPassed;
@@ -390,6 +392,11 @@ class DBAProbeRuntime
     static string GetServerNonce()
     {
         return s_ServerNonce;
+    }
+
+    static bool GetLatestClockEstimate(string playerID, out float offsetMS, out float uncertaintyMS)
+    {
+        return s_LatestClockOffsetByPlayer.Find(playerID, offsetMS) && s_LatestClockUncertaintyByPlayer.Find(playerID, uncertaintyMS);
     }
 
     static void MarkLocalShot(int muzzleIndex)

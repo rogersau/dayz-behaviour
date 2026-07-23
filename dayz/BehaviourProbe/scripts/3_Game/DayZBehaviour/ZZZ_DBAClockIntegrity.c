@@ -3,8 +3,6 @@ modded class DBAProbeRuntime
     protected static ref map<string, int> s_ClockChallengeSequenceByPlayer = new map<string, int>;
     protected static ref map<string, int> s_ClockChallengeSendMSByPlayer = new map<string, int>;
     protected static ref map<string, int> s_ClockChallengeExpiryMSByPlayer = new map<string, int>;
-    protected static ref map<string, float> s_LatestClockOffsetByPlayer = new map<string, float>;
-    protected static ref map<string, float> s_LatestClockUncertaintyByPlayer = new map<string, float>;
 
     static void RecordClockChallenge(string playerID, int challengeSequence, int serverSendMS)
     {
@@ -39,11 +37,6 @@ modded class DBAProbeRuntime
         s_LatestClockUncertaintyByPlayer.Remove(playerID);
     }
 
-    static bool GetLatestClockEstimate(string playerID, out float offsetMS, out float uncertaintyMS)
-    {
-        return s_LatestClockOffsetByPlayer.Find(playerID, offsetMS) && s_LatestClockUncertaintyByPlayer.Find(playerID, uncertaintyMS);
-    }
-
     static bool ReceiveValidatedClockResponse(PlayerIdentity sender, ParamsReadContext ctx)
     {
         if (!sender)
@@ -72,9 +65,15 @@ modded class DBAProbeRuntime
         int expectedSequence;
         int expectedServerSendMS;
         int expiryMS;
-        if (!s_ClockChallengeSequenceByPlayer.Find(playerID, expectedSequence) ||
-            !s_ClockChallengeSendMSByPlayer.Find(playerID, expectedServerSendMS) ||
-            !s_ClockChallengeExpiryMSByPlayer.Find(playerID, expiryMS))
+        if (!s_ClockChallengeSequenceByPlayer.Find(playerID, expectedSequence))
+        {
+            return false;
+        }
+        if (!s_ClockChallengeSendMSByPlayer.Find(playerID, expectedServerSendMS))
+        {
+            return false;
+        }
+        if (!s_ClockChallengeExpiryMSByPlayer.Find(playerID, expiryMS))
         {
             return false;
         }

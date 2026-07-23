@@ -11,7 +11,15 @@ modded class MissionServer
 
         array<Man> players = new array<Man>;
         GetGame().GetPlayers(players);
-        int eligibleObserverCount = CountDBAEligibleObservers(players);
+        int eligibleObserverCount;
+        foreach (Man populationMember : players)
+        {
+            PlayerBase eligibleObserver = PlayerBase.Cast(populationMember);
+            if (eligibleObserver && eligibleObserver.GetIdentity() && eligibleObserver.IsAlive() && !eligibleObserver.IsUnconscious())
+            {
+                eligibleObserverCount++;
+            }
+        }
         foreach (DBADecisionEdge edge : edges)
         {
             string playerSessionID = GetDBAPlayerSessionID(edge.player_id);
@@ -97,7 +105,7 @@ modded class MissionServer
             }
 
             int nowMS = GetGame().GetTime();
-            if (!request || !IsDBAProbeEntityCurrent(request.observer) || !IsDBAProbeEntityCurrent(request.target) || request.observer == request.target || nowMS - request.queued_ms > m_DBAProbeConfig.max_probe_queue_age_ms)
+            if (!request || !request.observer || !request.observer.GetIdentity() || !request.observer.IsAlive() || request.observer.IsUnconscious() || !request.target || !request.target.GetIdentity() || !request.target.IsAlive() || request.target.IsUnconscious() || request.observer == request.target || nowMS - request.queued_ms > m_DBAProbeConfig.max_probe_queue_age_ms)
             {
                 continue;
             }

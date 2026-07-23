@@ -202,6 +202,7 @@ func countDroppedRandomOpportunities(batches []schema.Batch) int {
 				count++
 			}
 		}
+	}
 	return count
 }
 
