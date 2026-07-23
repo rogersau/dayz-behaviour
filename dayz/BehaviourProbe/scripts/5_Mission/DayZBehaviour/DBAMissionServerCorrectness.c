@@ -119,6 +119,14 @@ modded class MissionServer
         payload.probe_queued_ms = request.queued_ms;
         payload.probe_started_ms = startedMS;
         payload.probe_completed_ms = completedMS;
+        if (request.decision_event_upper_ms > 0)
+        {
+            payload.event_time_lower_ms = request.decision_event_lower_ms;
+            payload.event_time_upper_ms = request.decision_event_upper_ms;
+            payload.event_time_estimate_ms = request.decision_event_lower_ms + ((request.decision_event_upper_ms - request.decision_event_lower_ms) / 2);
+            payload.event_time_uncertainty_ms = (request.decision_event_upper_ms - request.decision_event_lower_ms) / 2;
+            payload.event_timing_source = request.decision_timing_source;
+        }
 
         bool validatedFirstPerson = m_DBAProbeConfig.server_first_person_only && m_DBAProbeConfig.visibility_origin_mode == "VALIDATED_FIRST_PERSON_HEAD" && m_DBAProbeConfig.visibility_validation_id != "";
         string classification = result.GetClassificationName();
