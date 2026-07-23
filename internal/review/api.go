@@ -14,7 +14,7 @@ import (
 
 type Candidate struct {
 	CandidateID               string            `json:"candidate_id"`
-	PlayerPseudonym           string            `json:"player_pseudonym"`
+	PlayerID                  string            `json:"player_id"`
 	ReviewPriority            string            `json:"review_priority"`
 	ReadinessEffect           float64           `json:"readiness_effect"`
 	ReadinessLowerBound       float64           `json:"readiness_lower_bound"`
@@ -259,176 +259,40 @@ func (a *API) routes() {
 		}
 		writeJSON(w, http.StatusCreated, value)
 	})
-	a.mux.HandleFunc("POST /v1/review-cases/{id}/dispositions", a.addDisposition)
-	a.mux.HandleFunc("POST /v1/replay-runs", func(w http.ResponseWriter, request *http.Request) {
-		request.Body = http.MaxBytesReader(w, request.Body, 16*1024)
-		var body struct {
-			RequestedBy string `json:"requested_by"`
-		}
-		decoder := json.NewDecoder(request.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.RequestedBy) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "requested_by is required"})
-			return
-		}
-		run := ReplayRun{RunID: "replay_" + time.Now().UTC().Format("20060102T150405.000000000"), Status: "QUEUED", RequestedBy: body.RequestedBy, CreatedAt: time.Now().UTC()}
-		if err := a.repository.CreateReplayRun(run); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not queue replay"})
-			return
-		}
-		writeJSON(w, http.StatusAccepted, run)
-	})
-	a.mux.HandleFunc("GET /v1/algorithm-runs/{id}", func(w http.ResponseWriter, request *http.Request) {
-		value, ok, err := a.repository.GetAlgorithmRun(request.PathValue("id"))
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "repository unavailable"})
-			return
-		}
-		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "algorithm run not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, value)
-	})
-}
-
-func (a *API) listCandidates(w http.ResponseWriter, request *http.Request) {
-	values, err := a.repository.ListCandidates()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "repository unavailable"})
-		return
-	}
-	query := request.URL.Query()
-	filtered := values[:0]
-	for _, value := range values {
-		if query.Get("server") != "" && value.ServerID != query.Get("server") {
-			continue
-		}
-		if query.Get("camera_mode") != "" && value.CameraMode != query.Get("camera_mode") {
-			continue
-		}
-		if query.Get("squad_status") != "" && value.SquadStatus != query.Get("squad_status") {
-			continue
-		}
-		if query.Get("feature_family") != "" && value.FeatureFamily != query.Get("feature_family") {
-			continue
-		}
-		if query.Get("review_priority") != "" && value.ReviewPriority != query.Get("review_priority") {
-			continue
-		}
-		if query.Get("confidence") != "" {
-			minimum, parseErr := strconv.ParseFloat(query.Get("confidence"), 64)
-			if parseErr != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "confidence must be numeric"})
-				return
-			}
-			if value.ControlQuality < minimum {
-				continue
-			}
-		}
-		if !withinDate(value.CreatedAt, query.Get("date_from"), query.Get("date_to")) {
-			continue
-		}
-		filtered = append(filtered, value)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"candidates": filtered})
-}
-
-func withinDate(value time.Time, from, to string) bool {
-	if from != "" {
-		parsed, err := time.Parse(time.RFC3339, from)
-		if err != nil || value.Before(parsed) {
-			return false
-		}
-	}
-	if to != "" {
-		parsed, err := time.Parse(time.RFC3339, to)
-		if err != nil || value.After(parsed) {
-			return false
-		}
-	}
-	return true
-}
-
-func (a *API) getCandidate(w http.ResponseWriter, request *http.Request) {
-	value, ok, err := a.repository.GetCandidate(request.PathValue("id"))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "repository unavailable"})
-		return
-	}
-	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "candidate not found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, value)
-}
-
-func (a *API) getIncident(w http.ResponseWriter, request *http.Request) {
-	value, ok, err := a.repository.GetIncident(request.PathValue("id"))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "repository unavailable"})
-		return
-	}
-	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "incident not found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, value)
-}
-
-func (a *API) addDisposition(w http.ResponseWriter, request *http.Request) {
-	request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
-	var value Disposition
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid disposition"})
-		return
-	}
-	value.CaseID = request.PathValue("id")
-	value.CreatedAt = time.Now().UTC()
-	if err := a.repository.AddDisposition(value); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusCreated, value)
 }
 
 func (a *API) authorise(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/healthz" || request.URL.Path == "/" || a.token == "" {
+		if request.URL.Path == "/healthz" || request.URL.Path == "/" {
 			next.ServeHTTP(w, request)
 			return
 		}
-		const prefix = "Bearer "
-		header := request.Header.Get("Authorization")
-		if !strings.HasPrefix(header, prefix) || !secureEqual(strings.TrimPrefix(header, prefix), a.token) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorised"})
+		if a.token == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication is not configured"})
+			return
+		}
+		value := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(value), []byte(a.token)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 		next.ServeHTTP(w, request)
 	})
 }
 
-const reviewHTML = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Behavioural awareness review</title><style>
-body{font:15px system-ui;margin:2rem;max-width:1100px;color:#17202a}label{display:block;margin-bottom:1rem}input{min-width:24rem;padding:.45rem}button{padding:.5rem .8rem}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.6rem;border-bottom:1px solid #d5d8dc}small{color:#566573}.error{color:#922b21}
-</style></head><body><h1>Behavioural awareness review</h1>
-<p><small>Outlier evidence supports manual review only. It is not proof of cheating and cannot trigger gameplay action.</small></p>
-<label>Review token <input id="token" type="password" autocomplete="off"> <button id="load">Load candidates</button></label>
-<p id="status"></p><table><thead><tr><th>Pseudonym</th><th>Priority</th><th>Readiness effect</th><th>Sessions</th><th>Encounters</th><th>Targets</th></tr></thead><tbody id="rows"></tbody></table>
-<script>
-const status=document.getElementById('status'),rows=document.getElementById('rows');
-document.getElementById('load').onclick=async()=>{status.textContent='Loading…';rows.replaceChildren();try{const response=await fetch('/v1/review-candidates',{headers:{Authorization:'Bearer '+document.getElementById('token').value}});if(!response.ok)throw new Error('HTTP '+response.status);const data=await response.json();for(const item of data.candidates||[]){const tr=document.createElement('tr');for(const value of [item.player_pseudonym,item.review_priority,item.readiness_effect,item.independent_session_count,item.independent_encounter_count,item.independent_target_count]){const td=document.createElement('td');td.textContent=value??'';tr.appendChild(td)}rows.appendChild(tr)}status.textContent=(data.candidates||[]).length+' candidate(s)';status.className=''}catch(error){status.textContent=String(error);status.className='error'}};
-</script></body></html>`
-
-func secureEqual(left, right string) bool {
-	return len(left) == len(right) && subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
-}
-
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func parseLimit(request *http.Request, fallback, maximum int) int {
+	value, err := strconv.Atoi(request.URL.Query().Get("limit"))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
