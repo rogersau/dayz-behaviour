@@ -104,7 +104,7 @@ modded class MissionServer
         payload.right_upper_point_result = result.right_upper_result;
         payload.bone_validity = result.bone_validity;
         payload.sampling_stream = request.sampling_stream;
-        payload.sampling_policy_version = "dual-stream-v1";
+        payload.sampling_policy_version = "dual-stream-v2-neutral-controls";
         payload.sampling_reason = request.sampling_reason;
         payload.observer_eligible_count = request.observer_eligible_count;
         payload.observer_inclusion_probability = request.observer_inclusion_probability;
