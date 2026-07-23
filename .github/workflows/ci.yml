@@ -23,8 +23,20 @@ jobs:
         run: go test ./pkg/...
       - name: Test internal packages
         run: go test ./internal/...
-      - name: Test commands
-        run: go test ./cmd/...
+      - name: Compile analyse command
+        run: go test ./cmd/analyse
+      - name: Compile ingestd command
+        run: go test ./cmd/ingestd
+      - name: Compile normalize command
+        run: go test ./cmd/normalize
+      - name: Compile privacy-delete command
+        run: go test ./cmd/privacy-delete
+      - name: Compile replay command
+        run: go test ./cmd/replay
+      - name: Compile retention command
+        run: go test ./cmd/retention
+      - name: Compile reviewd command
+        run: go test ./cmd/reviewd
       - name: Test with race detector
         run: go test -race ./...
       - name: Vet
@@ -43,4 +55,6 @@ jobs:
           DBA_REVIEW_TOKEN: test-review-token
           DBA_STEAM_ADMIN_IDS: "76561198000000000"
           DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
+          DBA_PSEUDONYM_SECRET: test-pseudonym-secret-at-least-32-characters
+          DBA_PSEUDONYM_KEY_ID: test-v1
         run: docker compose -f deploy/compose.yaml config --quiet
