@@ -17,44 +17,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Generate direct identity store source
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          source = Path('internal/postgres/store.go').read_text()
-          old = '''func pseudonymousSessionID(raw string) string {
-          \tif raw == "" {
-          \t\treturn ""
-          \t}
-          \treturn "ps_" + digest(raw)
-          }
-
-          func pseudonymousDurableID(raw string) string {
-          \tif raw == "" {
-          \t\treturn ""
-          \t}
-          \treturn "dp_" + digest(raw)
-          }
-          '''
-          new = '''func pseudonymousSessionID(raw string) string {
-          \treturn identity.SessionID(raw)
-          }
-
-          func pseudonymousDurableID(raw string) string {
-          \treturn identity.DurableID(raw)
-          }
-          '''
-          if old not in source:
-              raise SystemExit('expected identity helper block not found')
-          generated = source.replace(old, new)
-          Path('generated-store.go').write_text(generated)
-          PY
-          gofmt -w generated-store.go
-      - name: Upload direct identity store source
-        uses: actions/upload-artifact@v4
-        with:
-          name: direct-identity-store-source
-          path: generated-store.go
       - name: Check formatting
         id: formatting
         continue-on-error: true
