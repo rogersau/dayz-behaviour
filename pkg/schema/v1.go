@@ -175,11 +175,15 @@ func validateVisibilityPayload(raw json.RawMessage) error {
 	if classification == "ROBUSTLY_OCCLUDED" {
 		validationID, _ := fields["visibility_validation_id"].(string)
 		duration, _ := fields["occlusion_duration_ms"].(float64)
-		if origin != "FIRST_PERSON_EYE" || strings.TrimSpace(validationID) == "" || duration <= 0 {
+		if !validatedFirstPersonOrigin(origin) || strings.TrimSpace(validationID) == "" || duration <= 0 {
 			return errors.New("robust occlusion requires a validated first-person origin and positive duration")
 		}
 	}
 	return nil
+}
+
+func validatedFirstPersonOrigin(origin string) bool {
+	return origin == "VALIDATED_FIRST_PERSON_HEAD" || origin == "FIRST_PERSON_EYE"
 }
 
 func validateIdentifier(name, value string, required bool) error {

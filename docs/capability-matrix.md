@@ -23,10 +23,11 @@ Mission: local diagnostic `Test.chernarusplus`
 ## Safe interpretation
 
 - Default visibility origin is `PLAYER_HEAD_APPROXIMATION`; blocked rays are `HEAD_ORIGIN_OCCLUDED`, never strong evidence.
-- `FIRST_PERSON_EYE` can be configured only with a non-empty controlled-validation ID, and a second blocked probe must satisfy the configured minimum duration.
-- Third-person head rays cannot become `ROBUSTLY_OCCLUDED`.
+- `ROBUSTLY_OCCLUDED` requires all of: a server that enforces first person, `server_first_person_only=true`, `visibility_origin_mode=VALIDATED_FIRST_PERSON_HEAD`, a non-empty controlled-validation ID, and a repeated blocked probe meeting the configured minimum duration.
+- Third-person or unknown-perspective head rays cannot become `ROBUSTLY_OCCLUDED`.
+- Queued observer and target entities are revalidated for identity, life state, consciousness and range immediately before probing.
 - Missing or implausible client telemetry can suppress evidence but cannot strengthen it.
 
 ## Next controlled run
 
-Use at least two connected clients and labelled observer/target placements. Capture the execution side, values and timing for every pending row before issuing a visibility validation ID or increasing collection budgets.
+Use at least two connected clients and labelled observer/target placements. Capture the execution side, values and timing for every pending row before issuing a visibility validation ID or increasing collection budgets. The reconnect fixture must also confirm that client sequences restarting from one are accepted after the player session is rotated.

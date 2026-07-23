@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        id: formatting
+        continue-on-error: true
+        run: |
+          gofmt -w ./cmd ./internal ./pkg
+          git diff --binary > gofmt.patch
+          test ! -s gofmt.patch
+      - name: Upload formatting patch
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gofmt-patch
+          path: gofmt.patch
+      - name: Fail after formatting patch upload
+        if: steps.formatting.outcome == 'failure'
+        run: exit 1
+      - name: Test schema packages
+        run: go test ./pkg/...
+      - name: Test internal packages
+        run: go test ./internal/...
+      - name: Compile analyse command
+        run: go test ./cmd/analyse
+      - name: Compile ingestd command
+        id: ingestd
+        continue-on-error: true
+        run: go test ./cmd/ingestd > ingestd-test.log 2>&1
+      - name: Upload ingestd failure log
+        if: steps.ingestd.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestd-test-log
+          path: ingestd-test.log
+      - name: Fail after ingestd log upload
+        if: steps.ingestd.outcome == 'failure'
+        run: exit 1
+      - name: Compile normalize command
+        run: go test ./cmd/normalize
+      - name: Compile privacy-delete command
+        run: go test ./cmd/privacy-delete
+      - name: Compile replay command
+        run: go test ./cmd/replay
+      - name: Compile retention command
+        run: go test ./cmd/retention
+      - name: Compile reviewd command
+        run: go test ./cmd/reviewd
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build commands
+        run: go build ./cmd/...
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        env:
+          DBA_POSTGRES_PASSWORD: test-postgres-password
+          DBA_QUERY_TOKEN: test-ingest-token
+          DBA_REVIEW_TOKEN: test-review-token
+          DBA_STEAM_ADMIN_IDS: "76561198000000000"
+          DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
+          DBA_PSEUDONYM_SECRET: test-pseudonym-secret-at-least-32-characters
+          DBA_PSEUDONYM_KEY_ID: test-v1
+        run: docker compose -f deploy/compose.yaml config --quiet
