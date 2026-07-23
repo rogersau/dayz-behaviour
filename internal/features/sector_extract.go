@@ -9,6 +9,7 @@ import (
 )
 
 type sectorEvent struct {
+	batch   schema.Batch
 	event   schema.Event
 	payload struct {
 		SamplingReason  string    `json:"sampling_reason"`
@@ -28,8 +29,7 @@ func EstimateConcealedSectorForSessions(sessionIDs []string, batches []schema.Ba
 	var events []sectorEvent
 	for _, batch := range batches {
 		for _, event := range batch.Events {
-			var item sectorEvent
-			item.event = event
+			item := sectorEvent{batch: batch, event: event}
 			if len(event.Payload) > 0 {
 				_ = json.Unmarshal(event.Payload, &item.payload)
 			}
@@ -37,6 +37,12 @@ func EstimateConcealedSectorForSessions(sessionIDs []string, batches []schema.Ba
 		}
 	}
 	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].batch.ServerID != events[j].batch.ServerID {
+			return events[i].batch.ServerID < events[j].batch.ServerID
+		}
+		if events[i].batch.ServerSessionID != events[j].batch.ServerSessionID {
+			return events[i].batch.ServerSessionID < events[j].batch.ServerSessionID
+		}
 		if events[i].event.ServerTimeMS == events[j].event.ServerTimeMS {
 			return events[i].event.ServerSequence < events[j].event.ServerSequence
 		}
@@ -48,6 +54,9 @@ func EstimateConcealedSectorForSessions(sessionIDs []string, batches []schema.Ba
 			continue
 		}
 		for _, candidate := range events[index+1:] {
+			if candidate.batch.ServerID != item.batch.ServerID || candidate.batch.ServerSessionID != item.batch.ServerSessionID {
+				break
+			}
 			if candidate.event.ServerTimeMS-item.event.ServerTimeMS > 1500 {
 				break
 			}
