@@ -13,9 +13,9 @@ modded class MissionGameplay
     protected int m_DBAProbeLastHealthMS;
     protected int m_DBAProbeLastDetectorMS;
     protected int m_DBAProbeBurstUntilMS;
-    protected int m_DBAProbeLastQueuedSequence;
     protected ref array<ref DBAClientSample> m_DBAProbeSamples = new array<ref DBAClientSample>;
     protected ref array<ref DBAClientSample> m_DBAProbeRing = new array<ref DBAClientSample>;
+    protected ref map<int, bool> m_DBAProbeQueuedSequences = new map<int, bool>;
     protected ref DBAClientTransitionDetector m_DBAProbeTransitionDetector = new DBAClientTransitionDetector;
 
     override void OnUpdate(float timeslice)
@@ -51,12 +51,12 @@ modded class MissionGameplay
     {
         m_DBAProbeSamples.Clear();
         m_DBAProbeRing.Clear();
+        m_DBAProbeQueuedSequences.Clear();
         m_DBAProbeDetectorAccumulator = 0;
         m_DBAProbeBaselineAccumulator = 0;
         m_DBAProbeBatchAccumulator = 0;
         m_DBAProbeLastDetectorMS = 0;
         m_DBAProbeBurstUntilMS = 0;
-        m_DBAProbeLastQueuedSequence = 0;
         m_DBAProbeTransitionDetector = new DBAClientTransitionDetector;
     }
 
@@ -84,6 +84,11 @@ modded class MissionGameplay
 
         if (m_DBAProbeRing.Count() >= 50)
         {
+            DBAClientSample expired = m_DBAProbeRing.Get(0);
+            if (expired)
+            {
+                m_DBAProbeQueuedSequences.Remove(expired.client_sequence);
+            }
             m_DBAProbeRing.RemoveOrdered(0);
         }
         m_DBAProbeRing.Insert(sample);
@@ -95,7 +100,7 @@ modded class MissionGameplay
         }
         array<string> transitions = new array<string>;
         m_DBAProbeTransitionDetector.Process(sample, transitions);
-        bool meaningfulEdge;
+        bool meaningfulEdge = false;
         foreach (string transition : transitions)
         {
             if (transition == "WEAPON_RAISED" || transition == "ADS_ENTERED" || transition == "OPTICS_ENTERED" || transition == "DELIBERATE_CAMERA_TURN" || transition == "SHOT_FIRED_CLIENT")
@@ -128,16 +133,28 @@ modded class MissionGameplay
     {
         foreach (DBAClientSample sample : m_DBAProbeRing)
         {
-            sample.sample_mode = "pre_event_ring";
-            QueueDBASampleForExport(sample);
+            if (sample)
+            {
+                sample.sample_mode = "pre_event_ring";
+                QueueDBASampleForExport(sample);
+            }
         }
     }
 
     protected void QueueDBASampleForExport(DBAClientSample sample)
     {
-        if (!sample || sample.client_sequence <= m_DBAProbeLastQueuedSequence)
+        if (!sample)
         {
             return;
+        }
+        bool alreadyQueued;
+        if (m_DBAProbeQueuedSequences.Find(sample.client_sequence, alreadyQueued))
+        {
+            return;
+        }
+        if (m_DBAProbeSamples.Count() >= DBAProbeConstants.MAX_CLIENT_SAMPLES_PER_BATCH)
+        {
+            SendDBAProbeBatch();
         }
         if (m_DBAProbeSamples.Count() >= DBAProbeConstants.MAX_CLIENT_SAMPLES_PER_BATCH)
         {
@@ -145,7 +162,7 @@ modded class MissionGameplay
             m_DBAProbeDroppedSamples++;
         }
         m_DBAProbeSamples.Insert(sample);
-        m_DBAProbeLastQueuedSequence = sample.client_sequence;
+        m_DBAProbeQueuedSequences.Set(sample.client_sequence, true);
     }
 
     protected void SendDBATemporalDecisionEdge(string edgeType, int clientLowerMS, int clientUpperMS, vector cameraDirection)
