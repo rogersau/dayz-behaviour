@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/rogersau/dayz-behaviour/internal/postgres"
@@ -16,9 +17,13 @@ func main() {
 	rawRoot := flag.String("raw-dir", "./data/raw", "immutable raw batch root")
 	databaseURL := flag.String("database-url", os.Getenv("DBA_DATABASE_URL"), "PostgreSQL connection URL")
 	watchInterval := flag.Duration("watch-interval", 0, "continuously normalize new batches at this interval; zero runs once")
+	checkpointPath := flag.String("checkpoint", "", "durable manifest checkpoint path; defaults under raw-dir")
 	flag.Parse()
 	if *databaseURL == "" {
 		log.Fatal("database URL is required")
+	}
+	if *checkpointPath == "" {
+		*checkpointPath = filepath.Join(*rawRoot, "normalize.checkpoint")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -31,7 +36,10 @@ func main() {
 	if err := store.Migrate(ctx); err != nil {
 		log.Fatal(err)
 	}
-	tracker := replay.NewTracker()
+	tracker, err := replay.NewCheckpointTracker(*checkpointPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 	run := func() {
 		stats, runErr := tracker.Run(ctx, *rawRoot, store)
 		if runErr != nil {
