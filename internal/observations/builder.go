@@ -12,27 +12,29 @@ import (
 )
 
 const (
-	BuilderVersion      = "observation-builder-v3"
+	BuilderVersion      = "observation-builder-v4-temporal"
 	IndependenceVersion = "episode-window-v1"
 )
 
 type Config struct {
-	DecisionWindowMS    int64
-	RefractoryMS        int64
-	EpisodeGapMS        int64
-	EncounterGapMS      int64
-	MaxQueueDelayMS     int64
-	TimingPolicyVersion string
+	DecisionWindowMS      int64
+	RefractoryMS          int64
+	EpisodeGapMS          int64
+	EncounterGapMS        int64
+	MaxQueueDelayMS       int64
+	MaxEventUncertaintyMS int64
+	TimingPolicyVersion   string
 }
 
 func DefaultConfig() Config {
 	return Config{
-		DecisionWindowMS:    5_000,
-		RefractoryMS:        5_000,
-		EpisodeGapMS:        30_000,
-		EncounterGapMS:      120_000,
-		MaxQueueDelayMS:     250,
-		TimingPolicyVersion: "server-receive-window-v1",
+		DecisionWindowMS:      5_000,
+		RefractoryMS:          5_000,
+		EpisodeGapMS:          30_000,
+		EncounterGapMS:        120_000,
+		MaxQueueDelayMS:       250,
+		MaxEventUncertaintyMS: 500,
+		TimingPolicyVersion:   "interval-timing-v1",
 	}
 }
 
@@ -60,6 +62,10 @@ type Observation struct {
 	OutcomeType                string    `json:"outcome_type"`
 	OutcomeObserved            bool      `json:"outcome_observed"`
 	OutcomeObservedMS          int64     `json:"outcome_observed_ms"`
+	OutcomeLowerMS             int64     `json:"outcome_lower_ms"`
+	OutcomeUpperMS             int64     `json:"outcome_upper_ms"`
+	OutcomeUncertaintyMS       int64     `json:"outcome_uncertainty_ms"`
+	OutcomeTimingSource        string    `json:"outcome_timing_source"`
 	OutcomeAuthority           string    `json:"outcome_authority,omitempty"`
 	CueClass                   string    `json:"cue_class"`
 	Independent                bool      `json:"independent"`
@@ -72,6 +78,8 @@ type Observation struct {
 	OcclusionDurationMS        int64     `json:"occlusion_duration_ms"`
 	VisibilityValidationID     string    `json:"visibility_validation_id"`
 	FirstExposureMS            int64     `json:"first_exposure_ms"`
+	FirstExposureLowerMS       int64     `json:"first_exposure_lower_ms"`
+	FirstExposureUpperMS       int64     `json:"first_exposure_upper_ms"`
 	ExposureCause              string    `json:"exposure_cause"`
 	ExposureWindowCensored     bool      `json:"exposure_window_censored"`
 	TargetInclusionProbability float64   `json:"target_inclusion_probability"`
@@ -107,6 +115,7 @@ type wirePayload struct {
 	QueueAdmissionProbability  float64 `json:"queue_admission_probability"`
 	QueueDelayMS               int64   `json:"queue_delay_ms"`
 	ProbeStartedMS             int64   `json:"probe_started_ms"`
+	ProbeCompletedMS           int64   `json:"probe_completed_ms"`
 	SourcePlayerID             string  `json:"source_player_id"`
 	MapID                      string  `json:"map_id"`
 	AreaCell                   string  `json:"area_cell"`
@@ -119,6 +128,11 @@ type wirePayload struct {
 	OcclusionDurationMS        int64   `json:"occlusion_duration_ms"`
 	VisibilityValidationID     string  `json:"visibility_validation_id"`
 	ControlType                string  `json:"control_type"`
+	EventTimeLowerMS           int64   `json:"event_time_lower_ms"`
+	EventTimeUpperMS           int64   `json:"event_time_upper_ms"`
+	EventTimeEstimateMS        int64   `json:"event_time_estimate_ms"`
+	EventTimeUncertaintyMS     int64   `json:"event_time_uncertainty_ms"`
+	EventTimingSource          string  `json:"event_timing_source"`
 }
 
 type flatEvent struct {
@@ -128,9 +142,32 @@ type flatEvent struct {
 	data  wirePayload
 }
 
+type outcomeResult struct {
+	observed    bool
+	estimateMS  int64
+	lowerMS     int64
+	upperMS     int64
+	uncertainty int64
+	timing      string
+	authority   string
+	sourceIDs   []string
+}
+
+type exposureResult struct {
+	estimateMS int64
+	lowerMS    int64
+	upperMS    int64
+	cause      string
+	censored   bool
+	sourceIDs  []string
+}
+
 func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 	if config.DecisionWindowMS <= 0 || config.RefractoryMS <= 0 || config.EpisodeGapMS <= 0 || config.EncounterGapMS <= 0 || config.MaxQueueDelayMS <= 0 || config.TimingPolicyVersion == "" {
 		return nil, fmt.Errorf("observation durations must be positive")
+	}
+	if config.MaxEventUncertaintyMS <= 0 {
+		config.MaxEventUncertaintyMS = 500
 	}
 	events, err := flatten(batches)
 	if err != nil {
@@ -188,15 +225,32 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			observation.CueFacts = append(observation.CueFacts, *cueFact)
 			observation.SourceEventIDs = append(observation.SourceEventIDs, cueFact.SourceEventID)
 		}
-		observation.OutcomeObserved, observation.OutcomeObservedMS, observation.OutcomeAuthority, observation.SourceEventIDs = readinessOutcome(events, index+1, current, observation, observation.SourceEventIDs)
+		outcome := readinessOutcome(events, index+1, current, observation, observation.SourceEventIDs)
+		observation.OutcomeObserved = outcome.observed
+		observation.OutcomeObservedMS = outcome.estimateMS
+		observation.OutcomeLowerMS = outcome.lowerMS
+		observation.OutcomeUpperMS = outcome.upperMS
+		observation.OutcomeUncertaintyMS = outcome.uncertainty
+		observation.OutcomeTimingSource = outcome.timing
+		observation.OutcomeAuthority = outcome.authority
+		observation.SourceEventIDs = outcome.sourceIDs
 		if current.data.TargetPlayerID != "" {
-			observation.FirstExposureMS, observation.ExposureCause, observation.ExposureWindowCensored, observation.SourceEventIDs = firstExposure(events, index+1, current, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
+			exposure := firstExposure(events, index+1, current, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
+			observation.FirstExposureMS = exposure.estimateMS
+			observation.FirstExposureLowerMS = exposure.lowerMS
+			observation.FirstExposureUpperMS = exposure.upperMS
+			observation.ExposureCause = exposure.cause
+			observation.ExposureWindowCensored = exposure.censored
+			observation.SourceEventIDs = exposure.sourceIDs
 		} else {
 			observation.ExposureCause = "NOT_APPLICABLE"
 			observation.ExposureWindowCensored = true
 		}
 		observation.TimingEligible = observation.QueueDelayMS >= 0 && observation.QueueDelayMS <= config.MaxQueueDelayMS
-		observation.TimingPolicyVersion = fmt.Sprintf("%s:max-queue-%dms", config.TimingPolicyVersion, config.MaxQueueDelayMS)
+		if observation.OutcomeObserved && observation.OutcomeUncertaintyMS > config.MaxEventUncertaintyMS {
+			observation.TimingEligible = false
+		}
+		observation.TimingPolicyVersion = fmt.Sprintf("%s:max-queue-%dms:max-event-uncertainty-%dms", config.TimingPolicyVersion, config.MaxQueueDelayMS, config.MaxEventUncertaintyMS)
 		observation.StrongHiddenEligible = observation.VisibilityClass == "ROBUSTLY_OCCLUDED" &&
 			observation.VisibilityAuthority == "A" &&
 			validatedFirstPersonOrigin(observation.ObserverOriginMode) &&
@@ -222,8 +276,9 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 	return result, nil
 }
 
-func firstExposure(events []flatEvent, startIndex int, origin flatEvent, observation Observation, targetID string, sourceIDs []string) (int64, string, bool, []string) {
+func firstExposure(events []flatEvent, startIndex int, origin flatEvent, observation Observation, targetID string, sourceIDs []string) exposureResult {
 	const exposureHorizonMS = int64(30_000)
+	result := exposureResult{cause: "UNKNOWN", censored: true, sourceIDs: sourceIDs}
 	for _, candidate := range events[startIndex:] {
 		if !sameServerSession(origin, candidate) {
 			break
@@ -231,14 +286,28 @@ func firstExposure(events []flatEvent, startIndex int, origin flatEvent, observa
 		if candidate.event.ServerTimeMS > observation.StartedMS+exposureHorizonMS {
 			break
 		}
-		if candidate.event.PlayerSessionID != observation.ObserverPlayerSessionID || candidate.event.EventType != "VISIBILITY_OBSERVATION" || candidate.data.TargetPlayerID != targetID {
+		if candidate.event.PlayerSessionID != observation.ObserverPlayerSessionID || candidate.event.EventType != "VISIBILITY_OBSERVATION" || candidate.data.TargetPlayerID != targetID || candidate.data.SamplingStream != "event_enrichment" {
 			continue
 		}
-		if candidate.data.Classification == "EXPOSED" || candidate.data.Classification == "PARTIALLY_EXPOSED" {
-			return candidate.event.ServerTimeMS, "UNKNOWN", false, append(sourceIDs, candidate.id)
+		if candidate.data.Classification != "EXPOSED" && candidate.data.Classification != "PARTIALLY_EXPOSED" {
+			continue
 		}
+		lower := candidate.data.ProbeStartedMS
+		if lower <= 0 {
+			lower = candidate.event.ServerTimeMS
+		}
+		upper := candidate.data.ProbeCompletedMS
+		if upper < lower {
+			upper = lower
+		}
+		result.lowerMS = lower
+		result.upperMS = upper
+		result.estimateMS = lower + ((upper - lower) / 2)
+		result.censored = false
+		result.sourceIDs = append(sourceIDs, candidate.id)
+		return result
 	}
-	return 0, "UNKNOWN", true, sourceIDs
+	return result
 }
 
 func distanceBand(value float64) string {
@@ -312,12 +381,13 @@ func flatten(batches []schema.Batch) ([]flatEvent, error) {
 	return events, nil
 }
 
-func readinessOutcome(events []flatEvent, startIndex int, origin flatEvent, observation Observation, sourceIDs []string) (bool, int64, string, []string) {
+func readinessOutcome(events []flatEvent, startIndex int, origin flatEvent, observation Observation, sourceIDs []string) outcomeResult {
+	result := outcomeResult{sourceIDs: sourceIDs}
 	for _, candidate := range events[startIndex:] {
 		if !sameServerSession(origin, candidate) {
 			break
 		}
-		if candidate.event.ServerTimeMS > observation.ClosedMS {
+		if candidate.event.ServerTimeMS > observation.ClosedMS+5_000 {
 			break
 		}
 		if candidate.event.PlayerSessionID != observation.ObserverPlayerSessionID || candidate.event.EventType != "DECISION_EDGE" {
@@ -325,10 +395,46 @@ func readinessOutcome(events []flatEvent, startIndex int, origin flatEvent, obse
 		}
 		switch candidate.data.SamplingReason {
 		case "WEAPON_RAISED", "ADS_ENTERED", "OPTICS_ENTERED":
-			return true, candidate.event.ServerTimeMS, string(candidate.event.SourceAuthority), append(sourceIDs, candidate.id)
+		default:
+			continue
 		}
+		lower, upper, estimate, uncertainty, source := eventInterval(candidate)
+		if upper < observation.StartedMS || lower > observation.ClosedMS {
+			continue
+		}
+		result.observed = true
+		result.estimateMS = estimate
+		result.lowerMS = lower
+		result.upperMS = upper
+		result.uncertainty = uncertainty
+		result.timing = source
+		result.authority = string(candidate.event.SourceAuthority)
+		result.sourceIDs = append(sourceIDs, candidate.id)
+		return result
 	}
-	return false, 0, "", sourceIDs
+	return result
+}
+
+func eventInterval(event flatEvent) (int64, int64, int64, int64, string) {
+	lower := event.data.EventTimeLowerMS
+	upper := event.data.EventTimeUpperMS
+	if lower <= 0 || upper < lower {
+		lower = event.event.ServerTimeMS
+		upper = lower
+	}
+	estimate := event.data.EventTimeEstimateMS
+	if estimate < lower || estimate > upper {
+		estimate = lower + ((upper - lower) / 2)
+	}
+	uncertainty := event.data.EventTimeUncertaintyMS
+	if uncertainty <= 0 {
+		uncertainty = (upper - lower) / 2
+	}
+	source := event.data.EventTimingSource
+	if source == "" {
+		source = "SERVER_EVENT_POINT"
+	}
+	return lower, upper, estimate, uncertainty, source
 }
 
 func cueClass(events []flatEvent, currentIndex int, origin flatEvent, observerSessionID, targetID string, atMS int64) (string, *CueFact) {
