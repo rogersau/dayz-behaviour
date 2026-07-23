@@ -45,7 +45,6 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 | `cmd/reviewd` | Steam-authenticated evidence browser and review API |
 | `cmd/retention` | Dry-run-first raw, normalized, and review retention |
 | `cmd/privacy-delete` | Audited deletion of one durable player identity |
-| `cmd/direct-identity-rebuild` | Rebuilds previously anonymized derived data from retained raw batches using direct identities |
 
 ## Safety model
 
@@ -125,30 +124,6 @@ go run ./cmd/analyse -raw-dir ./data/raw
 ```
 
 Player and player-session identifiers remain directly cross-referenceable with DayZ, Steam, and external moderation systems. Treat normalized databases, API responses, exports, logs, and backups as sensitive personal data.
-
-## Migrating an existing anonymized database
-
-One-way pseudonyms cannot be reversed. When upgrading a database populated by an older release, rebuild the derived PostgreSQL data from retained raw batches:
-
-```powershell
-go run ./cmd/direct-identity-rebuild `
-  -raw-dir ./data/raw `
-  -database-url $env:DBA_DATABASE_URL
-```
-
-Review the dry-run counts, back up both data tiers, then execute with the required confirmation phrase:
-
-```powershell
-go run ./cmd/direct-identity-rebuild `
-  -raw-dir ./data/raw `
-  -database-url $env:DBA_DATABASE_URL `
-  -execute `
-  -confirm REBUILD_WITH_DIRECT_IDENTITIES
-
-go run ./cmd/analyse -raw-dir ./data/raw
-```
-
-The rebuild preserves restricted raw batches and the privacy audit log, clears derived normalized/review data, changes the identity policy, and replays raw telemetry. Review dispositions in the cleared derived tables are not recreated automatically.
 
 ## Operations and privacy
 
