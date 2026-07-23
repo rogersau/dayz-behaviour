@@ -53,8 +53,8 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // DeletePlayer removes subject-level normalized and review data after the raw
 // store has been scrubbed. Aggregate calibration records may be retained only
-// when they no longer reference a subject. The audit record contains a one-way
-// pseudonym, never the supplied durable identity.
+// when they no longer reference a subject. The audit record retains the direct
+// durable identity so deletion actions can be cross-referenced operationally.
 func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason string, affectedBatches []BatchRef) (map[string]int64, error) {
 	if strings.TrimSpace(durablePlayerID) == "" || strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("durable player identity, actor and reason are required")
@@ -64,8 +64,8 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 		return nil, err
 	}
 	defer tx.Rollback()
-	durablePseudonym := pseudonymousDurableID(durablePlayerID)
-	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE deletion_sessions ON COMMIT DROP AS SELECT player_session_id FROM player_sessions WHERE durable_player_id=$1`, durablePseudonym); err != nil {
+	directPlayerID := pseudonymousDurableID(durablePlayerID)
+	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE deletion_sessions ON COMMIT DROP AS SELECT player_session_id FROM player_sessions WHERE durable_player_id=$1`, directPlayerID); err != nil {
 		return nil, err
 	}
 	counts := map[string]int64{}
@@ -96,7 +96,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 	for _, query := range queries {
 		var err error
 		if strings.Contains(query.sql, "$1") {
-			err = deleteCount(query.name, query.sql, durablePseudonym)
+			err = deleteCount(query.name, query.sql, directPlayerID)
 		} else {
 			err = deleteCount(query.name, query.sql)
 		}
@@ -113,8 +113,8 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 	if err != nil {
 		return nil, err
 	}
-	auditID := "privacy_" + digest(fmt.Sprintf("%s:%s:%s:%v", durablePseudonym, actor, reason, affectedBatches))
-	if _, err := tx.ExecContext(ctx, `INSERT INTO privacy_audit_log(privacy_audit_id,action,subject_pseudonym,actor,reason,affected_counts) VALUES($1,'DELETE_PLAYER',$2,$3,$4,$5) ON CONFLICT DO NOTHING`, auditID, durablePseudonym, actor, reason, encodedCounts); err != nil {
+	auditID := "privacy_" + digest(fmt.Sprintf("%s:%s:%s:%v", directPlayerID, actor, reason, affectedBatches))
+	if _, err := tx.ExecContext(ctx, `INSERT INTO privacy_audit_log(privacy_audit_id,action,subject_pseudonym,actor,reason,affected_counts) VALUES($1,'DELETE_PLAYER',$2,$3,$4,$5) ON CONFLICT DO NOTHING`, auditID, directPlayerID, actor, reason, encodedCounts); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -324,7 +324,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 				source, source_authority, source_component, source_schema_version, collector_version,
 				server_sequence, server_time_ms, server_receive_ms, player_session_id,
 				client_sequence, client_monotonic_time_ms, payload, normalized_event_schema_version
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'v2-keyed-identities')
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'v3-direct-identities')
 			ON CONFLICT (source_event_id) DO NOTHING`,
 			sourceEventID, batch.ServerID, batch.ServerSessionID, batch.BatchSequence, event.EventType,
 			event.Source, authority, event.SourceComponent, event.SourceSchemaVersion, event.CollectorVersion,
