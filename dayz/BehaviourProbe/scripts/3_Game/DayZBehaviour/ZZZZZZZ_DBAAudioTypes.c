@@ -1,7 +1,7 @@
 modded class DBAProbeServerConfig
 {
     bool enable_audio_cues = true;
-    float audio_context_interval_seconds = 0.5;
+    float audio_context_interval_seconds = 2.0;
     float audio_min_movement_speed_mps = 0.25;
 };
 
