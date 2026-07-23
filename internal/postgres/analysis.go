@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/rogersau/dayz-behaviour/internal/cues"
 	"github.com/rogersau/dayz-behaviour/internal/features"
 	"github.com/rogersau/dayz-behaviour/internal/observations"
 	"github.com/rogersau/dayz-behaviour/internal/ranking"
 )
 
 type AnalysisCandidate struct {
-	PlayerPseudonym string
+	PlayerID        string
 	PlayerSessions  []string
 	Readiness       features.ReadinessResult
 	Matched         features.ConditionalLogitResult
@@ -41,7 +42,7 @@ func (s *Store) PersistAnalysis(ctx context.Context, built []observations.Observ
 		for _, cue := range observation.CueFacts {
 			details, _ := json.Marshal(map[string]string{"description": cue.Details, "derived_class": observation.CueClass})
 			cueID := "cue_" + digest(observation.ObservationID+":"+cue.SourceEventID+":"+cue.CueType)
-			if _, err = tx.ExecContext(ctx, `INSERT INTO cue_facts(cue_fact_id,observer_target_episode_id,source_event_id,cue_type,occurred_ms,cue_policy_version,details) VALUES($1,$2,$3,$4,$5,'cue-ledger-v1',$6) ON CONFLICT(cue_fact_id) DO NOTHING`, cueID, observation.ObserverTargetEpisodeID, cue.SourceEventID, cue.CueType, cue.OccurredMS, details); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO cue_facts(cue_fact_id,observer_target_episode_id,source_event_id,cue_type,occurred_ms,cue_policy_version,details) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(cue_fact_id) DO UPDATE SET cue_policy_version=EXCLUDED.cue_policy_version,details=EXCLUDED.details`, cueID, observation.ObserverTargetEpisodeID, cue.SourceEventID, cue.CueType, cue.OccurredMS, cues.LedgerVersion, details); err != nil {
 				return "", err
 			}
 		}
@@ -55,7 +56,7 @@ func (s *Store) PersistAnalysis(ctx context.Context, built []observations.Observ
 		if observation.TimingEligible {
 			timingQuality = 1.0
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO analysis_observations(observation_id,decision_window_id,feature_family,source_event_ids,cue_class,authority_quality,timing_quality,observation_builder_version,values) VALUES($1,$2,'hidden-threat-readiness',$3,$4,$5,$6,$7,$8) ON CONFLICT(observation_id) DO UPDATE SET values=EXCLUDED.values`, observation.ObservationID, observation.DecisionWindowID, sourceIDs, observation.CueClass, authorityQuality, timingQuality, observations.BuilderVersion, values); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO analysis_observations(observation_id,decision_window_id,feature_family,source_event_ids,cue_class,authority_quality,timing_quality,observation_builder_version,values) VALUES($1,$2,'hidden-threat-readiness',$3,$4,$5,$6,$7,$8) ON CONFLICT(observation_id) DO UPDATE SET source_event_ids=EXCLUDED.source_event_ids,cue_class=EXCLUDED.cue_class,authority_quality=EXCLUDED.authority_quality,timing_quality=EXCLUDED.timing_quality,values=EXCLUDED.values`, observation.ObservationID, observation.DecisionWindowID, sourceIDs, observation.CueClass, authorityQuality, timingQuality, observations.BuilderVersion, values); err != nil {
 			return "", err
 		}
 	}
@@ -78,33 +79,33 @@ func (s *Store) PersistAnalysis(ctx context.Context, built []observations.Observ
 			}
 		}
 	}
-	algorithmMaterial := map[string]any{"builder": observations.BuilderVersion, "matching": features.MatchingPolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "conditional_logit": features.ConditionalLogitVersion, "pre_exposure": features.PreExposureAlgorithmVersion, "ranking": ranking.PolicyVersion, "candidates": candidates}
+	algorithmMaterial := map[string]any{"builder": observations.BuilderVersion, "cue_ledger": cues.LedgerVersion, "matching": features.MatchingPolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "conditional_logit": features.ConditionalLogitVersion, "pre_exposure": features.PreExposureAlgorithmVersion, "ranking": ranking.PolicyVersion, "candidates": candidates}
 	material, _ := json.Marshal(algorithmMaterial)
 	runID := "algorithm_" + digest(string(material))
-	versions, _ := json.Marshal(map[string]string{"builder": observations.BuilderVersion, "matching": features.MatchingPolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "conditional_logit": features.ConditionalLogitVersion, "pre_exposure": features.PreExposureAlgorithmVersion, "ranking": ranking.PolicyVersion, "negative_controls": features.ValidationAlgorithmVersion})
+	versions, _ := json.Marshal(map[string]string{"builder": observations.BuilderVersion, "cue_ledger": cues.LedgerVersion, "matching": features.MatchingPolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "conditional_logit": features.ConditionalLogitVersion, "pre_exposure": features.PreExposureAlgorithmVersion, "ranking": ranking.PolicyVersion, "negative_controls": features.ValidationAlgorithmVersion})
 	if _, err = tx.ExecContext(ctx, `INSERT INTO algorithm_runs(algorithm_run_id,status,algorithm_versions,diagnostics) VALUES($1,'COMPLETED',$2,$3) ON CONFLICT(algorithm_run_id) DO NOTHING`, runID, versions, material); err != nil {
 		return "", err
 	}
 	for _, candidate := range candidates {
 		rawCounts, _ := json.Marshal(map[string]int{"hidden_successes": candidate.Readiness.HiddenSuccesses, "hidden_trials": candidate.Readiness.HiddenTrials, "control_successes": candidate.Readiness.ControlSuccesses, "control_trials": candidate.Readiness.ControlTrials})
 		diagnostics, _ := json.Marshal(map[string]any{"matched": candidate.Matched, "stability": candidate.Stability, "negative_controls": candidate.Controls})
-		featureID := "feature_" + digest(runID+":"+candidate.PlayerPseudonym)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,lower_bound,upper_bound,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'hidden-threat-readiness',$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(feature_result_id) DO NOTHING`, featureID, candidate.PlayerPseudonym, features.ReadinessAlgorithmVersion, candidate.Readiness.ReadinessLift, candidate.Readiness.ReadinessLiftLowerBound, candidate.Readiness.ReadinessLift, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, rawCounts, diagnostics); err != nil {
+		featureID := "feature_" + digest(runID+":"+candidate.PlayerID)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,lower_bound,upper_bound,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'hidden-threat-readiness',$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(feature_result_id) DO NOTHING`, featureID, candidate.PlayerID, features.ReadinessAlgorithmVersion, candidate.Readiness.ReadinessLift, candidate.Readiness.ReadinessLiftLowerBound, candidate.Readiness.ReadinessLift, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, rawCounts, diagnostics); err != nil {
 			return "", err
 		}
 		sectorCounts, _ := json.Marshal(map[string]int{"samples": candidate.Sector.SampleCount})
 		sectorDiagnostics, _ := json.Marshal(candidate.Sector)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'concealed-sector-selection',$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(feature_result_id) DO NOTHING`, "feature_"+digest(runID+":"+candidate.PlayerPseudonym+":sector"), candidate.PlayerPseudonym, features.SectorAlgorithmVersion, candidate.Sector.ObservedConcentration-candidate.Sector.NullMean, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, sectorCounts, sectorDiagnostics); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'concealed-sector-selection',$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(feature_result_id) DO NOTHING`, "feature_"+digest(runID+":"+candidate.PlayerID+":sector"), candidate.PlayerID, features.SectorAlgorithmVersion, candidate.Sector.ObservedConcentration-candidate.Sector.NullMean, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, sectorCounts, sectorDiagnostics); err != nil {
 			return "", err
 		}
 		preCounts, _ := json.Marshal(map[string]int{"incidents": candidate.PreExposure.IncidentCount, "definite_pre_exposure": candidate.PreExposure.DefinitePreExposureCount, "ambiguous_timing": candidate.PreExposure.AmbiguousTimingCount})
 		preDiagnostics, _ := json.Marshal(candidate.PreExposure)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,lower_bound,upper_bound,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'pre-exposure-readiness',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(feature_result_id) DO NOTHING`, "feature_"+digest(runID+":"+candidate.PlayerPseudonym+":pre-exposure"), candidate.PlayerPseudonym, features.PreExposureAlgorithmVersion, candidate.PreExposure.PreExposureRateLower, candidate.PreExposure.PreExposureRateLower, candidate.PreExposure.PreExposureRateUpper, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, preCounts, preDiagnostics); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO feature_results(feature_result_id,player_session_id,feature_family,feature_algorithm_version,effect,lower_bound,upper_bound,independent_session_count,independent_encounter_count,independent_target_count,raw_counts,diagnostics) VALUES($1,$2,'pre-exposure-readiness',$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(feature_result_id) DO NOTHING`, "feature_"+digest(runID+":"+candidate.PlayerID+":pre-exposure"), candidate.PlayerID, features.PreExposureAlgorithmVersion, candidate.PreExposure.PreExposureRateLower, candidate.PreExposure.PreExposureRateLower, candidate.PreExposure.PreExposureRateUpper, candidate.Readiness.IndependentSessionCount, candidate.Readiness.IndependentEncounterCount, candidate.Readiness.IndependentTargetCount, preCounts, preDiagnostics); err != nil {
 			return "", err
 		}
-		components, _ := json.Marshal(map[string]any{"candidate_id": "candidate_" + digest(runID+":"+candidate.PlayerPseudonym), "player_pseudonym": candidate.PlayerPseudonym, "review_priority": candidate.Decision.Tier, "readiness_effect": candidate.Readiness.ReadinessLift, "readiness_lower_bound": candidate.Readiness.ReadinessLiftLowerBound, "sector_selection_effect": candidate.Sector.ObservedConcentration - candidate.Sector.NullMean, "pre_exposure_effect_lower": candidate.PreExposure.PreExposureRateLower, "pre_exposure_effect_upper": candidate.PreExposure.PreExposureRateUpper, "pre_exposure_status": candidate.PreExposure.Status, "independent_session_count": candidate.Readiness.IndependentSessionCount, "independent_encounter_count": candidate.Readiness.IndependentEncounterCount, "independent_target_count": candidate.Readiness.IndependentTargetCount, "authority_quality": 1, "control_quality": controlQuality(candidate.Matched), "telemetry_completeness": 0, "policy_versions": map[string]string{"ranking": ranking.PolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "matching": features.MatchingPolicyVersion, "sector": features.SectorAlgorithmVersion, "pre_exposure": features.PreExposureAlgorithmVersion}, "limitations": []string{"pre-exposure is experimental supporting-only", "uncaptured audio, external communications and human inference remain possible"}, "incident_ids": incidentIDs(candidate.PlayerSessions, built)})
-		candidateID := "candidate_" + digest(runID+":"+candidate.PlayerPseudonym)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO candidate_rankings(candidate_ranking_id,durable_player_id,ranking_policy_version,review_tier,component_values) VALUES($1,$2,$3,$4,$5) ON CONFLICT(candidate_ranking_id) DO NOTHING`, candidateID, candidate.PlayerPseudonym, ranking.PolicyVersion, candidate.Decision.Tier, components); err != nil {
+		components, _ := json.Marshal(map[string]any{"candidate_id": "candidate_" + digest(runID+":"+candidate.PlayerID), "player_id": candidate.PlayerID, "review_priority": candidate.Decision.Tier, "readiness_effect": candidate.Readiness.ReadinessLift, "readiness_lower_bound": candidate.Readiness.ReadinessLiftLowerBound, "sector_selection_effect": candidate.Sector.ObservedConcentration - candidate.Sector.NullMean, "pre_exposure_effect_lower": candidate.PreExposure.PreExposureRateLower, "pre_exposure_effect_upper": candidate.PreExposure.PreExposureRateUpper, "pre_exposure_status": candidate.PreExposure.Status, "independent_session_count": candidate.Readiness.IndependentSessionCount, "independent_encounter_count": candidate.Readiness.IndependentEncounterCount, "independent_target_count": candidate.Readiness.IndependentTargetCount, "authority_quality": 1, "control_quality": controlQuality(candidate.Matched), "telemetry_completeness": 0, "policy_versions": map[string]string{"ranking": ranking.PolicyVersion, "readiness": features.ReadinessAlgorithmVersion, "matching": features.MatchingPolicyVersion, "sector": features.SectorAlgorithmVersion, "pre_exposure": features.PreExposureAlgorithmVersion, "cue_ledger": cues.LedgerVersion}, "limitations": []string{"audio cues estimate audibility without recording raw audio", "external communications and human inference remain possible"}, "incident_ids": incidentIDs(candidate.PlayerSessions, built)})
+		candidateID := "candidate_" + digest(runID+":"+candidate.PlayerID)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO candidate_rankings(candidate_ranking_id,durable_player_id,ranking_policy_version,review_tier,component_values) VALUES($1,$2,$3,$4,$5) ON CONFLICT(candidate_ranking_id) DO UPDATE SET durable_player_id=EXCLUDED.durable_player_id,ranking_policy_version=EXCLUDED.ranking_policy_version,review_tier=EXCLUDED.review_tier,component_values=EXCLUDED.component_values`, candidateID, candidate.PlayerID, ranking.PolicyVersion, candidate.Decision.Tier, components); err != nil {
 			return "", err
 		}
 		if candidate.Decision.Tier == ranking.Review || candidate.Decision.Tier == ranking.HighPriority {
