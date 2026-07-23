@@ -14,7 +14,7 @@ coverage.out
 *.jsonl
 *.db
 *.sqlite
-spool/
+/spool/
 data/
 
 # IDE / OS

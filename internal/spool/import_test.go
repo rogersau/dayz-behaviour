@@ -70,17 +70,17 @@ func TestImportDirRestoresMalformedSpool(t *testing.T) {
 
 func validBatch() schema.Batch {
 	return schema.Batch{
-		SchemaVersion: 1,
-		ServerID: "server",
+		SchemaVersion:   1,
+		ServerID:        "server",
 		ServerSessionID: "session",
-		BatchSequence: 1,
-		ServerTimeMS: 1,
+		BatchSequence:   1,
+		ServerTimeMS:    1,
 		Events: []schema.Event{{
-			EventType: "PLAYER_SNAPSHOT",
-			Source: schema.SourceServer,
+			EventType:       "PLAYER_SNAPSHOT",
+			Source:          schema.SourceServer,
 			SourceAuthority: schema.AuthorityServer,
-			ServerSequence: 1,
-			ServerTimeMS: 1,
+			ServerSequence:  1,
+			ServerTimeMS:    1,
 		}},
 	}
 }
