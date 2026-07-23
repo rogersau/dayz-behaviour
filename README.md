@@ -15,7 +15,7 @@ This project looks for repeated behavioural patterns such as:
 - reacting before a target becomes visible, while preserving timing uncertainty;
 - repeating these patterns across different sessions, encounters, and target players.
 
-A single incident is not treated as proof. The system requires repeated, independent observations and presents limitations such as uncaptured audio, team communications, and ordinary player inference.
+A single incident is not treated as proof. The system requires repeated, independent observations and preserves legitimate explanations such as prior visual contact, gunshots, inferred footsteps, team communications, map knowledge, prediction, and information the collector did not capture.
 
 ## How it works
 
@@ -28,7 +28,9 @@ DayZ server ─────┘                                  │
                                                     └─> reviewd ───> admin explorer
 ```
 
-The DayZ server remains the authority for identity, lifecycle, combat, position, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
+The DayZ server remains the authority for identity, lifecycle, combat, position, movement-audio opportunities, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
+
+The system does **not** record raw audio. It derives audibility opportunities from authoritative gunshot events and movement context such as speed, stance, surface, footwear, position, distance, and suppressor state.
 
 Read [Architecture](docs/architecture.md) for the complete data flow and trust model.
 
@@ -36,13 +38,14 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 
 | Component | Purpose |
 |---|---|
-| `dayz/BehaviourProbe` | Client/server DayZ mod that captures bounded telemetry and visibility observations |
+| `dayz/BehaviourProbe` | Client/server DayZ mod that captures bounded telemetry, gunshot/movement audio opportunities, and visibility observations |
 | `cmd/ingestd` | Authenticated loopback receiver and DayZ spool importer |
-| `cmd/normalize` | Converts immutable raw batches into pseudonymized PostgreSQL records |
-| `cmd/analyse` | Builds observations, matched controls, feature estimates, and review tiers |
+| `cmd/normalize` | Converts immutable raw batches into PostgreSQL records using direct DayZ/Steam identities |
+| `cmd/analyse` | Builds observations, audio cue facts, matched controls, feature estimates, and review tiers |
 | `cmd/reviewd` | Steam-authenticated evidence browser and review API |
 | `cmd/retention` | Dry-run-first raw, normalized, and review retention |
 | `cmd/privacy-delete` | Audited deletion of one durable player identity |
+| `cmd/direct-identity-rebuild` | Rebuilds previously anonymized derived data from retained raw batches using direct identities |
 
 ## Safety model
 
@@ -50,6 +53,8 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 - Strong hidden-target evidence requires server-authoritative geometry and a validated first-person visibility policy.
 - Client data can suppress confidence but cannot strengthen an allegation by itself.
 - Hidden observations are compared with neutral no-relevant-target opportunities, not merely with visible opponents.
+- Captured gunshots and likely footsteps can explain an incident; possible audio cues remain visible without automatically suppressing analysis.
+- Audio cues describe plausible audibility, not proof that a player heard a sound.
 - Evidence breadth, uncertainty, matched-model stability, and negative-control gates are required before higher review tiers are produced.
 - Pre-exposure timing is experimental supporting evidence and cannot promote a review tier.
 
@@ -105,9 +110,9 @@ Set at least:
 }
 ```
 
-Visibility probing is disabled by default. Do not enable strong hidden-target evidence until the server is first-person-only and its visibility policy has passed a controlled validation fixture.
+Audio opportunity capture is enabled by default. Visibility probing is disabled by default. Do not enable strong hidden-target evidence until the server is first-person-only and its visibility policy has passed a controlled validation fixture.
 
-See [Deployment](docs/deployment.md) for the full setup, environment variables, network topology, and first-run checklist.
+See [Deployment](docs/deployment.md) for the full setup, environment variables, network topology, audio validation, and first-run checklist.
 
 ## Running analysis manually
 
@@ -119,7 +124,31 @@ go run ./cmd/normalize -raw-dir ./data/raw
 go run ./cmd/analyse -raw-dir ./data/raw
 ```
 
-Use the same `DBA_PSEUDONYM_SECRET` and `DBA_PSEUDONYM_KEY_ID` for normalization, analysis, and review.
+Player and player-session identifiers remain directly cross-referenceable with DayZ, Steam, and external moderation systems. Treat normalized databases, API responses, exports, logs, and backups as sensitive personal data.
+
+## Migrating an existing anonymized database
+
+One-way pseudonyms cannot be reversed. When upgrading a database populated by an older release, rebuild the derived PostgreSQL data from retained raw batches:
+
+```powershell
+go run ./cmd/direct-identity-rebuild `
+  -raw-dir ./data/raw `
+  -database-url $env:DBA_DATABASE_URL
+```
+
+Review the dry-run counts, back up both data tiers, then execute with the required confirmation phrase:
+
+```powershell
+go run ./cmd/direct-identity-rebuild `
+  -raw-dir ./data/raw `
+  -database-url $env:DBA_DATABASE_URL `
+  -execute `
+  -confirm REBUILD_WITH_DIRECT_IDENTITIES
+
+go run ./cmd/analyse -raw-dir ./data/raw
+```
+
+The rebuild preserves restricted raw batches and the privacy audit log, clears derived normalized/review data, changes the identity policy, and replays raw telemetry. Review dispositions in the cleared derived tables are not recreated automatically.
 
 ## Operations and privacy
 
@@ -127,14 +156,12 @@ Retention requires PostgreSQL configuration. Privacy deletion can report matchin
 
 ```powershell
 go run ./cmd/retention -raw-dir ./data/raw
-go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-id>'
+go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-dayz-id>'
 ```
 
 Both tools are report-only unless `-execute` is supplied.
 
-Production deployments must configure a stable pseudonym secret and key ID before the database is first populated. Changing them later requires an explicit identity migration.
-
-See [Operations, security, and privacy](docs/operations.md) for backups, spool recovery, retention, deletion, administrator access, key management, and troubleshooting.
+See [Operations, security, and privacy](docs/operations.md) for backups, spool recovery, direct-identity handling, retention, deletion, administrator access, and troubleshooting.
 
 ## Documentation
 
@@ -146,6 +173,6 @@ See [Operations, security, and privacy](docs/operations.md) for backups, spool r
 
 ## Current maturity
 
-The collector, authenticated ingest path, immutable raw storage, normalization, analysis, persistent review data, Steam-authenticated explorer, maps, spool recovery, retention, and deletion workflows are implemented.
+The collector, authenticated ingest path, immutable raw storage, normalization, analysis, persistent review data, Steam-authenticated explorer, maps, spool recovery, retention, deletion workflows, direct identity output, and a first conservative gunshot/footstep cue model are implemented.
 
-The project should still be treated as an evaluation system until each deployment has completed its own multiplayer visibility validation, representative-load testing, calibration on trusted cohorts, negative-control checks, and review-yield assessment.
+The project should still be treated as an evaluation system until each deployment has completed its own multiplayer callback validation, audio-model calibration, visibility validation, representative-load testing, trusted-cohort calibration, negative-control checks, and review-yield assessment.
