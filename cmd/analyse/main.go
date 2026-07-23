@@ -183,23 +183,15 @@ func playerPseudonym(playerSessionID string) string {
 	if index := strings.LastIndex(playerSessionID, ":"); index >= 0 {
 		value = playerSessionID[index+1:]
 	}
-	return "player_" + displayDigest(value)
+	return identity.DurableID(value)
 }
 
 func pseudonymousSessions(input []string) []string {
 	result := make([]string, 0, len(input))
 	for _, value := range input {
-		result = append(result, "session_"+displayDigest(value))
+		result = append(result, identity.SessionID(value))
 	}
 	return result
-}
-
-func displayDigest(value string) string {
-	encoded := identity.MustDigest(value)
-	if len(encoded) > 32 {
-		return encoded[:32]
-	}
-	return encoded
 }
 
 func countDroppedRandomOpportunities(batches []schema.Batch) int {
@@ -210,7 +202,6 @@ func countDroppedRandomOpportunities(batches []schema.Batch) int {
 				count++
 			}
 		}
-	}
 	return count
 }
 
