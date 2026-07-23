@@ -3,6 +3,8 @@ modded class DBAProbeRuntime
     protected static ref map<string, int> s_ClockChallengeSequenceByPlayer = new map<string, int>;
     protected static ref map<string, int> s_ClockChallengeSendMSByPlayer = new map<string, int>;
     protected static ref map<string, int> s_ClockChallengeExpiryMSByPlayer = new map<string, int>;
+    protected static ref map<string, float> s_LatestClockOffsetByPlayer = new map<string, float>;
+    protected static ref map<string, float> s_LatestClockUncertaintyByPlayer = new map<string, float>;
 
     static void RecordClockChallenge(string playerID, int challengeSequence, int serverSendMS)
     {
@@ -24,6 +26,22 @@ modded class DBAProbeRuntime
         s_ClockChallengeSequenceByPlayer.Remove(playerID);
         s_ClockChallengeSendMSByPlayer.Remove(playerID);
         s_ClockChallengeExpiryMSByPlayer.Remove(playerID);
+    }
+
+    static void ResetClockAlignment(string playerID)
+    {
+        ResetClockChallenge(playerID);
+        if (playerID == "")
+        {
+            return;
+        }
+        s_LatestClockOffsetByPlayer.Remove(playerID);
+        s_LatestClockUncertaintyByPlayer.Remove(playerID);
+    }
+
+    static bool GetLatestClockEstimate(string playerID, out float offsetMS, out float uncertaintyMS)
+    {
+        return s_LatestClockOffsetByPlayer.Find(playerID, offsetMS) && s_LatestClockUncertaintyByPlayer.Find(playerID, uncertaintyMS);
     }
 
     static bool ReceiveValidatedClockResponse(PlayerIdentity sender, ParamsReadContext ctx)
@@ -83,6 +101,8 @@ modded class DBAProbeRuntime
         sample.round_trip_ms = roundTripMS;
         sample.offset_estimate_ms = ((expectedServerSendMS - clientReceiveMS) + (serverReceiveMS - clientSendMS)) * 0.5;
         sample.uncertainty_ms = roundTripMS * 0.5;
+        s_LatestClockOffsetByPlayer.Set(playerID, sample.offset_estimate_ms);
+        s_LatestClockUncertaintyByPlayer.Set(playerID, sample.uncertainty_ms);
         if (s_ClockSamples.Count() >= DBAProbeConstants.MAX_QUEUED_CLOCK_SAMPLES)
         {
             s_ClockSamples.RemoveOrdered(0);
