@@ -12,7 +12,7 @@ modded class MissionServer
         }
 
         m_DBAAudioContextAccumulator += timeslice;
-        float interval = Math.Max(0.25, m_DBAProbeConfig.audio_context_interval_seconds);
+        float interval = Math.Max(0.5, m_DBAProbeConfig.audio_context_interval_seconds);
         if (m_DBAAudioContextAccumulator < interval)
         {
             return;
@@ -93,7 +93,9 @@ modded class MissionServer
             payload.stance_name = GetDBAStanceName(movementState.m_iStanceIdx);
 
             vector position = player.GetPosition();
-            GetGame().SurfaceGetType3D(position[0], position[1], position[2], payload.surface_type);
+            string surfaceType;
+            GetGame().SurfaceGetType3D(position[0], position[1], position[2], surfaceType);
+            payload.surface_type = surfaceType;
 
             EntityAI footwear = player.FindAttachmentBySlotName("Feet");
             if (footwear)
