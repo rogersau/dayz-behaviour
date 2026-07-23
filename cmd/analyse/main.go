@@ -42,9 +42,11 @@ type candidate struct {
 }
 
 type dataQuality struct {
-	StrongHiddenObservationCount int      `json:"strong_hidden_observation_count"`
-	ControlObservationCount      int      `json:"control_observation_count"`
-	Limitations                  []string `json:"limitations"`
+	StrongHiddenObservationCount    int      `json:"strong_hidden_observation_count"`
+	NeutralControlObservationCount  int      `json:"neutral_control_observation_count"`
+	VisiblePositiveControlCount     int      `json:"visible_positive_control_observation_count"`
+	DroppedRandomOpportunityCount   int      `json:"dropped_random_opportunity_count"`
+	Limitations                     []string `json:"limitations"`
 }
 
 func main() {
@@ -82,9 +84,14 @@ func main() {
 			result.DataQuality.StrongHiddenObservationCount++
 		}
 		if observation.ControlEligible {
-			result.DataQuality.ControlObservationCount++
+			result.DataQuality.NeutralControlObservationCount++
+		}
+		if observation.PositiveControlEligible {
+			result.DataQuality.VisiblePositiveControlCount++
 		}
 	}
+	result.DataQuality.DroppedRandomOpportunityCount = countDroppedRandomOpportunities(batches)
+
 	var playerIDs []string
 	for playerID := range players {
 		playerIDs = append(playerIDs, playerID)
@@ -104,6 +111,7 @@ func main() {
 		stability := features.LeaveOneSessionOut(playerID, sessions, built, 5, 5)
 		sector := features.EstimateConcealedSectorForSessions(sessions, batches)
 		preExposure := estimatePreExposureForSessions(sessions, built)
+		decision := ranking.ApplyValidatedEvidence(readiness, matched, stability, negativeControls, ranking.DefaultGates())
 		result.Candidates = append(result.Candidates, candidate{
 			PlayerPseudonym:  playerID,
 			PlayerSessions:   pseudonymousSessions(sessions),
@@ -113,9 +121,9 @@ func main() {
 			NegativeControls: negativeControls,
 			SectorSelection:  sector,
 			PreExposure:      preExposure,
-			ReviewPriority:   ranking.ApplyValidatedEvidence(readiness, matched, stability, negativeControls, ranking.DefaultGates()),
+			ReviewPriority:   decision,
 		})
-		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerPseudonym: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: ranking.ApplyValidatedEvidence(readiness, matched, stability, negativeControls, ranking.DefaultGates())})
+		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerPseudonym: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: decision})
 	}
 	if *databaseURL != "" {
 		ctx := context.Background()
@@ -141,6 +149,10 @@ func main() {
 	if result.DataQuality.StrongHiddenObservationCount == 0 {
 		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
 			"no validated first-person robust-occlusion observations; no hidden-awareness effect can be promoted")
+	}
+	if result.DataQuality.NeutralControlObservationCount == 0 {
+		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
+			"no neutral no-relevant-target controls were available; readiness lift cannot be estimated")
 	}
 	if len(built) == 0 {
 		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
@@ -175,6 +187,18 @@ func digest(value string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
+func countDroppedRandomOpportunities(batches []schema.Batch) int {
+	count := 0
+	for _, batch := range batches {
+		for _, event := range batch.Events {
+			if event.EventType == "SAMPLING_OPPORTUNITY_DROPPED" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func estimatePreExposureForSessions(sessionIDs []string, built []observations.Observation) features.PreExposureResult {
 	eligible := map[string]struct{}{}
 	for _, id := range sessionIDs {
@@ -182,7 +206,7 @@ func estimatePreExposureForSessions(sessionIDs []string, built []observations.Ob
 	}
 	var incidents []features.PreExposureIncident
 	for _, observation := range built {
-		if _, ok := eligible[observation.ObserverPlayerSessionID]; !ok || observation.FirstExposureMS == 0 {
+		if _, ok := eligible[observation.ObserverPlayerSessionID]; !ok || observation.FirstExposureMS == 0 || !observation.StrongHiddenEligible || !observation.Independent || observation.CueClass != "UNEXPLAINED_IN_CAPTURED_DATA" {
 			continue
 		}
 		incidents = append(incidents, features.PreExposureIncident{ReadinessMS: observation.OutcomeObservedMS, ExposureMS: observation.FirstExposureMS, Censored: observation.ExposureWindowCensored})
