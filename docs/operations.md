@@ -1,25 +1,27 @@
 # Operations, security, and privacy
 
-This guide covers day-to-day operation after the stack and DayZ mod are deployed. The system contains sensitive player telemetry and should be operated as a restricted administrative service.
+This guide covers day-to-day operation after the stack and DayZ mod are deployed. The system contains direct player identities, exact routes, combat context, inferred audibility, and review data. Operate it as a restricted administrative service.
 
 ## Operational boundaries
 
 - `ingestd` and PostgreSQL should remain on loopback or a private service network.
 - The DayZ query token is suitable only for the sidecar boundary created by the server host.
 - Remote administrator access should reach only `reviewd` through HTTPS.
-- Raw telemetry, DayZ profiles, environment files, database backups, and spool files must be accessible only to authorized operators.
+- Raw telemetry, DayZ profiles, environment files, database backups, spool files, API exports, and screenshots must be accessible only to authorized operators.
 - No service sends analysis or enforcement commands to DayZ.
+- Audio cues are inferred from game state; no raw audio is captured.
 
 ## Service responsibilities
 
 | Service/tool | Operational responsibility |
 |---|---|
 | `ingestd` | Authenticate, validate, and durably store raw batches; import DayZ spool files |
-| `normalize` | Continuously convert new raw batches into PostgreSQL records |
-| `analyse` | Produce versioned feature results and review rankings |
+| `normalize` | Continuously convert new raw batches into direct-identity PostgreSQL records |
+| `analyse` | Build cue facts, feature results, and review rankings |
 | `reviewd` | Serve authenticated evidence and record review dispositions |
 | `retention` | Report or enforce independent raw/normalized/review retention windows |
 | `privacy-delete` | Report or delete all references to one durable player identity |
+| `direct-identity-rebuild` | Replace older pseudonymized derived data by replaying retained raw batches with direct identities |
 
 ## Routine checks
 
@@ -34,9 +36,10 @@ Check:
 - event, probe, and export queues remain bounded;
 - dropped-event and dropped-opportunity counters are understood;
 - PostgreSQL and filesystem capacity remain healthy;
-- the explorer can list recent sessions.
+- the explorer can list recent direct player/session identities;
+- gunshot and movement-audio events are present when expected.
 
-A low-volume server may legitimately produce few visibility opportunities. Distinguish low opportunity counts from a stopped collector by checking lifecycle, snapshots, client health, and server collector health.
+A low-volume server may legitimately produce few visibility opportunities. Distinguish low opportunity counts from a stopped collector by checking lifecycle, snapshots, audio opportunities, client health, and server collector health.
 
 ### Before running or trusting analysis
 
@@ -45,6 +48,7 @@ Confirm the selected data contains:
 - validated strong-hidden observations;
 - neutral no-relevant-target controls;
 - visible positive controls;
+- plausible audio-cue coverage;
 - acceptable queue delay and clock uncertainty;
 - multiple independent sessions, encounters, and target identities;
 - no unexplained collection outage dominating the period.
@@ -81,6 +85,18 @@ Server and client health events contain counters such as:
 - spool overwrite count.
 
 Loss counters are context for evidence quality. They must not be interpreted as player behaviour.
+
+### Audio collection health
+
+During controlled checks, confirm:
+
+- `SHOT_FIRED_SERVER` appears once for each successful server-side shot callback;
+- shooter ID, weapon, ammunition, suppressor state, position, and timestamp are populated;
+- `MOVEMENT_AUDIO_OPPORTUNITY` appears at the configured bounded cadence only when speed exceeds the threshold;
+- stance, surface, footwear, position, and speed are populated;
+- audio opportunity volume is consistent with the configured interval and player count.
+
+A missing audio event means the system did not capture the cue. It does not prove the game produced no sound.
 
 ### Time quality
 
@@ -132,14 +148,111 @@ Raw batches are immutable. Do not edit them manually. Corrections are made throu
 PostgreSQL contains derived and operational tables for:
 
 - raw batch metadata;
-- normalized events and player sessions;
+- normalized events and direct player sessions;
 - sampling opportunities and visibility probes;
 - encounters, episodes, decision windows, cues, and observations;
 - feature results and algorithm runs;
 - candidate rankings and review cases;
 - dispositions and privacy audit records.
 
-PostgreSQL can be rebuilt from retained raw telemetry, except for review dispositions and any information already removed by retention or privacy deletion.
+Most PostgreSQL data can be rebuilt from retained raw telemetry. Review dispositions and other administrator-entered information do not exist in raw game events and must be backed up separately.
+
+## Direct identity policy
+
+The application stores the durable DayZ identity and full player-session identity directly:
+
+```text
+76561198000000000
+<server-session-id>:<session-sequence>:76561198000000000
+```
+
+This allows direct cross-reference with Steam, BattleMetrics, bans, tickets, and other moderation systems.
+
+It also removes pseudonymization as a privacy control. Protect:
+
+- PostgreSQL access;
+- API responses;
+- browser exports and screenshots;
+- log aggregation;
+- backups;
+- analytics output files;
+- ticket attachments.
+
+Do not expose direct identities in public reports unless your policy and legal basis permit it.
+
+### Existing pseudonymized databases
+
+Older versions used one-way HMAC or deterministic hashes. They cannot be reversed.
+
+The database will fail closed when its recorded identity policy does not match `direct-identifiers-v1`. Use the explicit rebuild workflow instead of changing policy rows manually.
+
+Dry run:
+
+```powershell
+go run ./cmd/direct-identity-rebuild `
+  -raw-dir ./data/raw `
+  -database-url $env:DBA_DATABASE_URL
+```
+
+Execute after backup and approval:
+
+```powershell
+go run ./cmd/direct-identity-rebuild `
+  -raw-dir ./data/raw `
+  -database-url $env:DBA_DATABASE_URL `
+  -execute `
+  -confirm REBUILD_WITH_DIRECT_IDENTITIES
+
+go run ./cmd/analyse -raw-dir ./data/raw
+```
+
+The command:
+
+1. reports exact derived-table counts;
+2. preserves restricted raw files, raw batch metadata, and the privacy audit log;
+3. clears normalized events, sessions, cues, observations, features, rankings, cases, and dispositions;
+4. switches the database identity policy;
+5. replays raw batches with direct identities;
+6. removes the normalization checkpoint so continuous normalization can resume safely.
+
+Export any reviewer dispositions that must be retained before execution. The raw replay cannot recreate them.
+
+## Audio-model operations
+
+### What the model does
+
+The model assigns a versioned audibility class using captured game facts:
+
+- gunshots: distance, weapon, ammunition, suppressor state, positions, and time;
+- footsteps: distance, speed/gait, stance, surface, footwear, positions, and time.
+
+### What the model does not do
+
+It does not reproduce:
+
+- raw game audio;
+- exact sound-set attenuation;
+- building-room acoustics or door/window transmission;
+- weather and ambient masking;
+- infected, item, reload, impact, or voice sounds not yet modelled;
+- hearing damage, headsets, equalizers, or client volume settings;
+- external voice communications.
+
+### Calibration procedure
+
+Maintain a deployment-specific fixture covering:
+
+- suppressed and unsuppressed weapons at labelled distances;
+- pistols, rifles, shotguns, automatic/burst fire, and modded weapons;
+- standing, crouched, and prone movement;
+- walk, jog, and sprint;
+- barefoot and representative footwear;
+- grass, dirt, road, concrete, wood, metal, building floors, and modded surfaces;
+- indoor/outdoor and obstructed scenarios, even when the first model cannot represent them.
+
+Record model version, DayZ build, mod list, environment, expected classification, observed player experience, and deviations.
+
+Change thresholds by publishing a new audio-model version. Do not silently reinterpret historical results under the same version.
 
 ## Backups
 
@@ -149,44 +262,14 @@ A usable backup plan should include:
 
 - filesystem-consistent copies or snapshots of `telemetry-data`;
 - PostgreSQL logical or physical backups appropriate to the deployment;
-- protected copies of the exact pseudonym key ID and secret;
 - deployment configuration and DayZ collector configuration;
+- administrator-entered review dispositions;
 - documented restoration tests;
 - the same retention and deletion obligations as the live system.
 
-The pseudonym secret is required to preserve identity joins after restore. Losing it makes historical normalized identities irreproducible. Exposing it weakens pseudonym protection.
+Because player IDs are direct, backups contain directly attributable personal data. Encrypt and restrict them accordingly.
 
-Test restoration into an isolated environment. Confirm migrations, normalization, session search, timelines, review cases, and map access before declaring the backup valid.
-
-## Pseudonym policy
-
-Production normalization uses HMAC-SHA-256 with separate prefixes:
-
-```text
-dp_<digest>  durable player identity
-ps_<digest>  player-session identity
-```
-
-Required variables:
-
-```text
-DBA_PSEUDONYM_SECRET=<stable random value of at least 32 bytes>
-DBA_PSEUDONYM_KEY_ID=<stable operator-managed identifier>
-```
-
-PostgreSQL stores the active policy version and key ID. A mismatch causes migration/startup to fail closed.
-
-### Key rotation
-
-Do not change the secret or key ID in place. A safe rotation requires a planned identity migration that updates every normalized, feature, ranking, case, and audit reference consistently, or a deliberate deletion and rebuild of non-production data.
-
-Until an explicit rotation tool exists, treat the production pseudonym key as long-lived and protect it with the same controls as a database encryption key.
-
-### Legacy unkeyed databases
-
-Databases that already contained identities before keyed pseudonyms are marked with the legacy unkeyed policy. They will reject a keyed process until the old data is intentionally migrated or cleared.
-
-Unkeyed deterministic hashes are not suitable for production because Steam IDs are enumerable and can be dictionary-matched.
+Test restoration into an isolated environment. Confirm migrations, normalization, direct session search, timelines, cue facts, review cases, and map access before declaring the backup valid.
 
 ## Database migrations
 
@@ -283,7 +366,7 @@ The deletion workflow removes events where the player is:
 
 - the event owner;
 - an observer or target;
-- a combat source;
+- a combat or audio source;
 - a durable or nested session identity reference.
 
 ### Dry run
@@ -309,9 +392,9 @@ Execution:
 
 1. deletes raw files containing only matching events;
 2. safely rewrites mixed raw batches;
-3. removes normalized, observation, feature, ranking, case, and disposition references;
+3. removes normalized, cue, observation, feature, ranking, case, and disposition references;
 4. removes raw batch metadata for affected batches;
-5. writes a privacy audit record containing only the keyed subject pseudonym and affected counts.
+5. writes a privacy audit record containing the direct subject identity and affected counts.
 
 After rewriting mixed raw batches, rerun normalization as documented by your deployment process.
 
@@ -320,10 +403,11 @@ The command cannot erase database snapshots, copied raw directories, exported re
 ## Review-case handling
 
 - Keep the model output and administrator conclusion separate.
-- Record behavioural observations, data limitations, conventional evidence, and the final operational decision.
+- Record observable behaviour, cue facts, data limitations, conventional evidence, and the final operational decision.
 - Do not describe a tier as a cheat probability.
+- Do not state that an audio cue was definitely heard.
 - Do not use one reviewer’s disposition as unquestioned training ground truth.
-- Restrict expanded payloads and exact route coordinates to the admin boundary.
+- Restrict expanded payloads, direct identities, and exact route coordinates to the admin boundary.
 - Close or annotate stale cases when later replay changes the analysis version or eligibility.
 
 ## Updating the software
@@ -331,20 +415,20 @@ The command cannot erase database snapshots, copied raw directories, exported re
 Before updating:
 
 1. back up raw and PostgreSQL data;
-2. record the current application commit, DayZ mod build, schema/migration state, sampling policy, visibility policy, and pseudonym key ID;
+2. record the current application commit, DayZ mod build, schema/migration state, sampling policy, visibility policy, audio policy, and identity policy;
 3. review migration and configuration changes;
 4. test against a copy of representative data;
 5. repack/re-sign the DayZ mod when script files changed;
-6. schedule validation for changed DayZ script surfaces or visibility behaviour.
+6. schedule validation for changed DayZ callbacks, audio context, or visibility behaviour.
 
 After updating:
 
 1. confirm migrations complete;
-2. verify ingest, normalization, explorer login, timelines, and maps;
-3. verify DayZ lifecycle and client RPC events;
+2. verify ingest, normalization, explorer login, direct identities, timelines, and maps;
+3. verify DayZ lifecycle, shot, movement-audio, and client RPC events;
 4. compare health/drop counters with the previous version;
 5. replay a known fixture and confirm the intended algorithm versions;
-6. document any result changes caused by a new builder or feature policy.
+6. document any result changes caused by a new builder, cue, feature, or ranking policy.
 
 ## Troubleshooting
 
@@ -366,10 +450,33 @@ Check:
 Check:
 
 - `normalize` is running and can connect to PostgreSQL;
-- the pseudonym policy matches the database;
+- the database identity policy is `direct-identifiers-v1`;
+- an older pseudonymized database has been rebuilt;
 - migrations completed;
 - normalization logs show processed batches rather than errors;
 - the explorer is using the same PostgreSQL database.
+
+### Gunshots are missing
+
+Check:
+
+- `enable_audio_cues` is true;
+- the server-side `Weapon_Base.EEFired` override compiled and loaded;
+- the target weapon calls the expected base method;
+- server logs and raw events show `SHOT_FIRED_SERVER`;
+- the source player is the weapon hierarchy root;
+- another mod did not replace the callback without chaining `super`.
+
+### Footstep cues are missing or excessive
+
+Check:
+
+- `audio_context_interval_seconds` and `audio_min_movement_speed_mps`;
+- authoritative velocity values on the target build;
+- stance and `Feet` attachment values;
+- `SurfaceGetType3D` results;
+- whether movement events are being dropped under export load;
+- whether the cue is outside the Go model’s configured range.
 
 ### Steam login loops or callback fails
 
@@ -398,33 +505,21 @@ Check:
 - hidden and neutral opportunities are both present;
 - clock and queue timing meet policy;
 - enough independent sessions, encounters, and targets exist;
+- known or plausible cues explain most observations;
 - collection loss or retention has not removed required history.
 
 This is not necessarily an error. Failing closed on insufficient evidence is intended behaviour.
-
-### High-priority results never appear
-
-The additional gates may be suppressing them. Inspect:
-
-- matched-model convergence and separation;
-- useful matched-strata count;
-- odds-ratio lower bound;
-- leave-one-session-out direction stability;
-- negative-control status;
-- readiness-lift lower bound.
-
-Do not weaken these gates merely to populate a queue. Calibrate them against trusted data and review capacity.
 
 ## Incident response
 
 Treat the following as operational incidents:
 
 - raw batch identity conflicts;
-- pseudonym-policy mismatch on an unexpected host;
+- direct identity or route exposure outside the restricted boundary;
 - unauthorized access or leaked tokens;
-- raw or normalized identity exposure outside the restricted boundary;
 - sustained spool overwrites or unexplained collector loss;
 - migration checksum mismatch;
+- incorrect audio model described as proof of hearing;
 - incorrect map substitution or coordinate precision;
 - evidence used for automatic enforcement;
 - deletion requests not propagated to backups or exports.
@@ -437,14 +532,16 @@ An operator should maintain deployment-specific records for:
 
 - exact DayZ build and loaded mod set;
 - script compilation and runtime callback fixtures;
+- gunshot and movement-audio callback validation;
+- audio-model calibration and known limitations;
 - visibility confusion matrix and validation ID;
 - clock and timing distributions;
 - representative player-count performance and queue loss;
 - trusted-cohort calibration and negative controls;
 - blinded or quality-controlled review yield;
 - backup restoration;
-- retention and privacy-deletion exercises;
+- direct-identity rebuild, retention, and privacy-deletion exercises;
 - administrator-access review;
-- change history for sampling, analysis, and ranking policies.
+- change history for sampling, cue, analysis, and ranking policies.
 
 The repository’s implementation alone cannot establish these environment-specific properties.
