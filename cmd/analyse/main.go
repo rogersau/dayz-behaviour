@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"log"
@@ -12,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rogersau/dayz-behaviour/internal/features"
+	"github.com/rogersau/dayz-behaviour/internal/identity"
 	"github.com/rogersau/dayz-behaviour/internal/observations"
 	"github.com/rogersau/dayz-behaviour/internal/postgres"
 	"github.com/rogersau/dayz-behaviour/internal/ranking"
@@ -23,6 +22,8 @@ type output struct {
 	ObservationBuilderVersion string      `json:"observation_builder_version"`
 	FeatureAlgorithmVersion   string      `json:"feature_algorithm_version"`
 	RankingPolicyVersion      string      `json:"ranking_policy_version"`
+	PseudonymPolicyVersion    string      `json:"pseudonym_policy_version"`
+	PseudonymKeyID            string      `json:"pseudonym_key_id"`
 	ObservationCount          int         `json:"observation_count"`
 	Candidates                []candidate `json:"candidates"`
 	DataQuality               dataQuality `json:"data_quality"`
@@ -42,11 +43,11 @@ type candidate struct {
 }
 
 type dataQuality struct {
-	StrongHiddenObservationCount    int      `json:"strong_hidden_observation_count"`
-	NeutralControlObservationCount  int      `json:"neutral_control_observation_count"`
-	VisiblePositiveControlCount     int      `json:"visible_positive_control_observation_count"`
-	DroppedRandomOpportunityCount   int      `json:"dropped_random_opportunity_count"`
-	Limitations                     []string `json:"limitations"`
+	StrongHiddenObservationCount   int      `json:"strong_hidden_observation_count"`
+	NeutralControlObservationCount int      `json:"neutral_control_observation_count"`
+	VisiblePositiveControlCount    int      `json:"visible_positive_control_observation_count"`
+	DroppedRandomOpportunityCount  int      `json:"dropped_random_opportunity_count"`
+	Limitations                    []string `json:"limitations"`
 }
 
 func main() {
@@ -54,8 +55,13 @@ func main() {
 	databaseURL := flag.String("database-url", os.Getenv("DBA_DATABASE_URL"), "optional PostgreSQL URL for durable analysis output")
 	flag.Parse()
 
+	pseudonymPolicy, err := identity.CurrentPolicy()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	var batches []schema.Batch
-	_, err := replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
+	_, err = replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
 		batches = append(batches, batch)
 		return nil
 	}))
@@ -72,6 +78,8 @@ func main() {
 		ObservationBuilderVersion: observations.BuilderVersion,
 		FeatureAlgorithmVersion:   features.ReadinessAlgorithmVersion,
 		RankingPolicyVersion:      ranking.PolicyVersion,
+		PseudonymPolicyVersion:    pseudonymPolicy.Version,
+		PseudonymKeyID:            pseudonymPolicy.KeyID,
 		ObservationCount:          len(built),
 	}
 	for _, observation := range built {
@@ -158,6 +166,10 @@ func main() {
 		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
 			"no random prospective opportunities were available")
 	}
+	if pseudonymPolicy.Version == identity.LegacyPolicyVersion {
+		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
+			"unkeyed development pseudonyms are active; configure DBA_PSEUDONYM_SECRET and DBA_PSEUDONYM_KEY_ID before production collection")
+	}
 
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -167,24 +179,27 @@ func main() {
 }
 
 func playerPseudonym(playerSessionID string) string {
-	identity := playerSessionID
+	value := playerSessionID
 	if index := strings.LastIndex(playerSessionID, ":"); index >= 0 {
-		identity = playerSessionID[index+1:]
+		value = playerSessionID[index+1:]
 	}
-	return "player_" + digest(identity)
+	return "player_" + displayDigest(value)
 }
 
 func pseudonymousSessions(input []string) []string {
 	result := make([]string, 0, len(input))
 	for _, value := range input {
-		result = append(result, "session_"+digest(value))
+		result = append(result, "session_"+displayDigest(value))
 	}
 	return result
 }
 
-func digest(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:16])
+func displayDigest(value string) string {
+	encoded := identity.MustDigest(value)
+	if len(encoded) > 32 {
+		return encoded[:32]
+	}
+	return encoded
 }
 
 func countDroppedRandomOpportunities(batches []schema.Batch) int {
