@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	BuilderVersion      = "observation-builder-v2"
+	BuilderVersion      = "observation-builder-v3"
 	IndependenceVersion = "episode-window-v1"
 )
 
@@ -65,6 +65,8 @@ type Observation struct {
 	Independent                bool      `json:"independent"`
 	StrongHiddenEligible       bool      `json:"strong_hidden_eligible"`
 	ControlEligible            bool      `json:"control_eligible"`
+	PositiveControlEligible    bool      `json:"positive_control_eligible"`
+	ControlKind                string    `json:"control_kind"`
 	TimingEligible             bool      `json:"timing_eligible"`
 	TimingPolicyVersion        string    `json:"timing_policy_version"`
 	OcclusionDurationMS        int64     `json:"occlusion_duration_ms"`
@@ -116,6 +118,7 @@ type wirePayload struct {
 	ServerPopulationCount      int     `json:"server_population_count"`
 	OcclusionDurationMS        int64   `json:"occlusion_duration_ms"`
 	VisibilityValidationID     string  `json:"visibility_validation_id"`
+	ControlType                string  `json:"control_type"`
 }
 
 type flatEvent struct {
@@ -136,7 +139,7 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 
 	var result []Observation
 	for index, current := range events {
-		if current.event.EventType != "VISIBILITY_OBSERVATION" || current.data.SamplingStream != "random_opportunity" {
+		if !isRandomOpportunityEvent(current) {
 			continue
 		}
 		started := current.data.ProbeStartedMS
@@ -144,7 +147,7 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			started = current.event.ServerTimeMS
 		}
 		targetSession := current.data.TargetPlayerSessionID
-		if targetSession == "" {
+		if targetSession == "" && current.data.TargetPlayerID != "" {
 			targetSession = current.batch.ServerSessionID + ":" + current.data.TargetPlayerID
 		}
 		cueClassification, cueFact := cueClass(events, index, current, current.event.PlayerSessionID, current.data.TargetPlayerID, started)
@@ -157,6 +160,7 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			ObserverPlayerSessionID:    current.event.PlayerSessionID,
 			TargetPlayerSessionID:      targetSession,
 			TargetIdentityKey:          targetIdentityKey(current.data.TargetPlayerID, targetSession),
+			ControlKind:                controlKind(current.data.Classification, current.data.ControlType),
 			StartedMS:                  started,
 			ClosedMS:                   started + config.DecisionWindowMS,
 			SamplingStream:             current.data.SamplingStream,
@@ -185,7 +189,12 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			observation.SourceEventIDs = append(observation.SourceEventIDs, cueFact.SourceEventID)
 		}
 		observation.OutcomeObserved, observation.OutcomeObservedMS, observation.OutcomeAuthority, observation.SourceEventIDs = readinessOutcome(events, index+1, current, observation, observation.SourceEventIDs)
-		observation.FirstExposureMS, observation.ExposureCause, observation.ExposureWindowCensored, observation.SourceEventIDs = firstExposure(events, index+1, current, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
+		if current.data.TargetPlayerID != "" {
+			observation.FirstExposureMS, observation.ExposureCause, observation.ExposureWindowCensored, observation.SourceEventIDs = firstExposure(events, index+1, current, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
+		} else {
+			observation.ExposureCause = "NOT_APPLICABLE"
+			observation.ExposureWindowCensored = true
+		}
 		observation.TimingEligible = observation.QueueDelayMS >= 0 && observation.QueueDelayMS <= config.MaxQueueDelayMS
 		observation.TimingPolicyVersion = fmt.Sprintf("%s:max-queue-%dms", config.TimingPolicyVersion, config.MaxQueueDelayMS)
 		observation.StrongHiddenEligible = observation.VisibilityClass == "ROBUSTLY_OCCLUDED" &&
@@ -195,7 +204,11 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			observation.TimingEligible &&
 			observation.TargetInclusionProbability > 0 &&
 			observation.QueueAdmissionProbability > 0
-		observation.ControlEligible = (observation.VisibilityClass == "EXPOSED" || observation.VisibilityClass == "PARTIALLY_EXPOSED") &&
+		observation.ControlEligible = observation.VisibilityClass == "NO_RELEVANT_TARGET" &&
+			observation.VisibilityAuthority == "A" &&
+			observation.TimingEligible &&
+			observation.QueueAdmissionProbability > 0
+		observation.PositiveControlEligible = (observation.VisibilityClass == "EXPOSED" || observation.VisibilityClass == "PARTIALLY_EXPOSED") &&
 			observation.VisibilityAuthority == "A" &&
 			observation.TimingEligible &&
 			observation.TargetInclusionProbability > 0 &&
@@ -319,6 +332,9 @@ func readinessOutcome(events []flatEvent, startIndex int, origin flatEvent, obse
 }
 
 func cueClass(events []flatEvent, currentIndex int, origin flatEvent, observerSessionID, targetID string, atMS int64) (string, *CueFact) {
+	if targetID == "" {
+		return "UNEXPLAINED_IN_CAPTURED_DATA", nil
+	}
 	const cueLookbackMS = int64(30_000)
 	for index := currentIndex - 1; index >= 0; index-- {
 		event := events[index]
@@ -369,6 +385,7 @@ func assignIndependence(observations []Observation, config Config) {
 			observation.Independent = false
 			observation.StrongHiddenEligible = false
 			observation.ControlEligible = false
+			observation.PositiveControlEligible = false
 		} else {
 			lastFeatureByObserver[observation.ObserverPlayerSessionID] = observation.StartedMS
 		}
@@ -379,6 +396,29 @@ func sameServerSession(left, right flatEvent) bool {
 	return left.batch.ServerID == right.batch.ServerID && left.batch.ServerSessionID == right.batch.ServerSessionID
 }
 
+func isRandomOpportunityEvent(event flatEvent) bool {
+	if event.data.SamplingStream != "random_opportunity" {
+		return false
+	}
+	return event.event.EventType == "VISIBILITY_OBSERVATION" || event.event.EventType == "SAMPLING_OPPORTUNITY"
+}
+
+func controlKind(classification, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	switch classification {
+	case "ROBUSTLY_OCCLUDED", "HEAD_ORIGIN_OCCLUDED":
+		return "HIDDEN_TARGET"
+	case "EXPOSED", "PARTIALLY_EXPOSED":
+		return "VISIBLE_TARGET"
+	case "NO_RELEVANT_TARGET":
+		return "NEUTRAL_NO_RELEVANT_TARGET"
+	default:
+		return "OTHER"
+	}
+}
+
 func validatedFirstPersonOrigin(value string) bool {
 	return value == "VALIDATED_FIRST_PERSON_HEAD" || value == "FIRST_PERSON_EYE"
 }
@@ -387,7 +427,10 @@ func targetIdentityKey(targetID, targetSessionID string) string {
 	if targetID != "" {
 		return stableID("target-identity", targetID)
 	}
-	return stableID("target-session", targetSessionID)
+	if targetSessionID != "" {
+		return stableID("target-session", targetSessionID)
+	}
+	return ""
 }
 
 func stableID(parts ...string) string {

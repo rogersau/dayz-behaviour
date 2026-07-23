@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MatchingPolicyVersion   = "exact-context-v1"
+	MatchingPolicyVersion   = "exact-context-v2-neutral-controls"
 	ConditionalLogitVersion = "conditional-logit-v1"
 )
 
@@ -38,10 +38,10 @@ type ConditionalLogitResult struct {
 	AlgorithmVersion string  `json:"algorithm_version"`
 }
 
-// BuildMatchedStrata performs exact within-player matching on the context
-// fields available in the prospective observation. Strata without both hidden
-// and exposed opportunities, or without outcome variation, are excluded by the
-// conditional model rather than presented as informative controls.
+// BuildMatchedStrata performs exact within-player matching on context available
+// to both hidden-target and neutral no-target opportunities. Target distance is
+// intentionally excluded until a geometry-matched empty-target control exists;
+// the reduced control quality records that limitation explicitly.
 func BuildMatchedStrata(input []observations.Observation) []MatchedStratum {
 	groups := map[string][]observations.Observation{}
 	for _, observation := range input {
@@ -51,10 +51,8 @@ func BuildMatchedStrata(input []observations.Observation) []MatchedStratum {
 		}
 		key := strings.Join([]string{
 			observation.ObserverPlayerSessionID, observation.ServerID, observation.MapID, observation.AreaCell,
-			observation.DistanceBand, observation.ObserverMovementBand,
-			intString(observation.ObserverStanceID), observation.BaselineWeaponState,
-			observation.CameraMode, observation.ServerPopulationBand,
-			observation.CueClass, observation.SamplingPolicyVersion,
+			observation.ObserverMovementBand, intString(observation.ObserverStanceID), observation.BaselineWeaponState,
+			observation.CameraMode, observation.ServerPopulationBand, observation.CueClass, observation.SamplingPolicyVersion,
 		}, "|")
 		groups[key] = append(groups[key], observation)
 	}
@@ -81,7 +79,7 @@ func BuildMatchedStrata(input []observations.Observation) []MatchedStratum {
 		sort.Slice(items, func(i, j int) bool { return items[i].ObservationID < items[j].ObservationID })
 		result = append(result, MatchedStratum{
 			StratumID: "stratum_" + hash16(key), PlayerSessionID: items[0].ObserverPlayerSessionID,
-			ContextKey: key, Observations: items, ControlQuality: 1, PolicyVersion: MatchingPolicyVersion,
+			ContextKey: key, Observations: items, ControlQuality: 0.5, PolicyVersion: MatchingPolicyVersion,
 		})
 	}
 	return result
@@ -245,6 +243,7 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+
 func maxInt(a, b int) int {
 	if a > b {
 		return a
