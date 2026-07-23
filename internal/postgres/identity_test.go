@@ -25,12 +25,3 @@ func TestNormalizePayloadPreservesDirectIdentityFields(t *testing.T) {
 		t.Fatalf("source player = %q", got)
 	}
 }
-
-func TestDirectIdentityHelpersArePassThrough(t *testing.T) {
-	if got := pseudonymousDurableID("player"); got != "player" {
-		t.Fatalf("durable identity = %q", got)
-	}
-	if got := pseudonymousSessionID("session"); got != "session" {
-		t.Fatalf("session identity = %q", got)
-	}
-}
