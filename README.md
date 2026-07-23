@@ -58,7 +58,7 @@ Add `-execute` only after reviewing the reported scope. Executed identity deleti
 
 Source is under `dayz/BehaviourProbe`. Pack and load it on both client and dedicated server. First launch creates `$profile:DayZBehaviourProbe/config.json`; configure the loopback endpoint and the same ingest token.
 
-Visibility probes are disabled by default. Keep `visibility_origin_mode` as `PLAYER_HEAD_APPROXIMATION` until a controlled first-person matrix passes. Do not set `FIRST_PERSON_EYE` or a validation ID merely to obtain strong labels.
+Visibility probes are disabled by default. Keep `visibility_origin_mode` as `PLAYER_HEAD_APPROXIMATION`, `server_first_person_only` as `false`, and the validation ID empty during development. Strong occlusion may only be enabled after a controlled first-person confusion matrix passes on a server that actually enforces first person; then set `server_first_person_only` to `true`, use `VALIDATED_FIRST_PERSON_HEAD`, and record the issued validation ID. Third-person or unknown-perspective head rays never become strong evidence.
 
 ## Design references
 
