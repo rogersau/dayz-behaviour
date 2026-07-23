@@ -14,7 +14,6 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/rogersau/dayz-behaviour/internal/identity"
 	"github.com/rogersau/dayz-behaviour/pkg/schema"
 )
 
@@ -64,8 +63,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 		return nil, err
 	}
 	defer tx.Rollback()
-	directPlayerID := pseudonymousDurableID(durablePlayerID)
-	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE deletion_sessions ON COMMIT DROP AS SELECT player_session_id FROM player_sessions WHERE durable_player_id=$1`, directPlayerID); err != nil {
+	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE deletion_sessions ON COMMIT DROP AS SELECT player_session_id FROM player_sessions WHERE durable_player_id=$1`, durablePlayerID); err != nil {
 		return nil, err
 	}
 	counts := map[string]int64{}
@@ -87,7 +85,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 		{"analysis_observations", `DELETE FROM analysis_observations WHERE decision_window_id IN (SELECT dw.decision_window_id FROM decision_windows dw JOIN sampling_opportunities so USING(opportunity_id) WHERE so.observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR so.target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
 		{"decision_windows", `DELETE FROM decision_windows WHERE opportunity_id IN (SELECT opportunity_id FROM sampling_opportunities WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
 		{"cue_facts", `DELETE FROM cue_facts WHERE observer_target_episode_id IN (SELECT observer_target_episode_id FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
-		{"observer_target_episodes", `DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
+		{"observer_target_episodes", `DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 		{"visibility_probe_runs", `DELETE FROM visibility_probe_runs WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 		{"sampling_opportunities", `DELETE FROM sampling_opportunities WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 		{"normalized_events", `DELETE FROM normalized_events WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'observer_player_session_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'target_player_session_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'observer_player_id'=$1 OR payload->>'target_player_id'=$1 OR payload->>'source_player_id'=$1 OR payload->>'player_id'=$1`},
@@ -96,7 +94,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 	for _, query := range queries {
 		var err error
 		if strings.Contains(query.sql, "$1") {
-			err = deleteCount(query.name, query.sql, directPlayerID)
+			err = deleteCount(query.name, query.sql, durablePlayerID)
 		} else {
 			err = deleteCount(query.name, query.sql)
 		}
@@ -113,8 +111,8 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 	if err != nil {
 		return nil, err
 	}
-	auditID := "privacy_" + digest(fmt.Sprintf("%s:%s:%s:%v", directPlayerID, actor, reason, affectedBatches))
-	if _, err := tx.ExecContext(ctx, `INSERT INTO privacy_audit_log(privacy_audit_id,action,subject_pseudonym,actor,reason,affected_counts) VALUES($1,'DELETE_PLAYER',$2,$3,$4,$5) ON CONFLICT DO NOTHING`, auditID, directPlayerID, actor, reason, encodedCounts); err != nil {
+	auditID := "privacy_" + digest(fmt.Sprintf("%s:%s:%s:%v", durablePlayerID, actor, reason, affectedBatches))
+	if _, err := tx.ExecContext(ctx, `INSERT INTO privacy_audit_log(privacy_audit_id,action,subject_player_id,actor,reason,affected_counts) VALUES($1,'DELETE_PLAYER',$2,$3,$4,$5) ON CONFLICT DO NOTHING`, auditID, durablePlayerID, actor, reason, encodedCounts); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -245,24 +243,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.ensurePseudonymPolicy(ctx)
-}
-
-func (s *Store) ensurePseudonymPolicy(ctx context.Context) error {
-	policy, err := identity.CurrentPolicy()
-	if err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO pseudonym_policy_state(singleton,policy_version,key_id) VALUES(true,$1,$2) ON CONFLICT(singleton) DO NOTHING`, policy.Version, policy.KeyID); err != nil {
-		return err
-	}
-	var storedVersion, storedKeyID string
-	if err := s.db.QueryRowContext(ctx, `SELECT policy_version,key_id FROM pseudonym_policy_state WHERE singleton=true`).Scan(&storedVersion, &storedKeyID); err != nil {
-		return err
-	}
-	if storedVersion != policy.Version || storedKeyID != policy.KeyID {
-		return fmt.Errorf("pseudonym policy mismatch: database uses %s/%s, process uses %s/%s", storedVersion, storedKeyID, policy.Version, policy.KeyID)
-	}
 	return nil
 }
 
@@ -317,7 +297,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 		if err != nil {
 			return fmt.Errorf("normalize payload %s: %w", sourceEventID, err)
 		}
-		playerSessionID := pseudonymousSessionID(event.PlayerSessionID)
+		playerSessionID := event.PlayerSessionID
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO normalized_events (
 				source_event_id, server_id, server_session_id, batch_sequence, event_type,
@@ -345,7 +325,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 				ON CONFLICT(player_session_id) DO UPDATE SET
 					started_ms=LEAST(player_sessions.started_ms,EXCLUDED.started_ms),
 					ended_ms=COALESCE(EXCLUDED.ended_ms,player_sessions.ended_ms)`,
-				playerSessionID, batch.ServerID, batch.ServerSessionID, pseudonymousDurableID(rawDurableID(event.PlayerSessionID)), event.ServerTimeMS, endedMS)
+				playerSessionID, batch.ServerID, batch.ServerSessionID, rawDurableID(event.PlayerSessionID), event.ServerTimeMS, endedMS)
 			if err != nil {
 				return err
 			}
@@ -372,16 +352,6 @@ func normalizePayload(raw json.RawMessage) (json.RawMessage, map[string]any, err
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			return nil, nil, err
-		}
-	}
-	for _, key := range []string{"observer_player_session_id", "target_player_session_id"} {
-		if value := stringField(fields, key); value != "" {
-			fields[key] = pseudonymousSessionID(value)
-		}
-	}
-	for _, key := range []string{"observer_player_id", "target_player_id", "source_player_id", "player_id"} {
-		if value := stringField(fields, key); value != "" {
-			fields[key] = pseudonymousDurableID(value)
 		}
 	}
 	payload, err := json.Marshal(fields)
@@ -436,14 +406,6 @@ func insertVisibilityProbe(ctx context.Context, tx *sql.Tx, sourceEventID, obser
 	return err
 }
 
-func pseudonymousSessionID(raw string) string {
-	return identity.SessionID(raw)
-}
-
-func pseudonymousDurableID(raw string) string {
-	return identity.DurableID(raw)
-}
-
 func rawDurableID(sessionID string) string {
 	if index := strings.LastIndex(sessionID, ":"); index >= 0 {
 		return sessionID[index+1:]
@@ -452,7 +414,8 @@ func rawDurableID(sessionID string) string {
 }
 
 func digest(value string) string {
-	return identity.MustDigest(value)
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func stringField(fields map[string]any, key string) string {
