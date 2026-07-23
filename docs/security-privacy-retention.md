@@ -13,9 +13,35 @@
 
 ## Identity boundary
 
-The restricted raw tier contains durable DayZ identifiers because the server must bind RPCs, join events and support identity deletion. Normalisation converts player sessions, durable IDs and known payload identity fields to deterministic SHA-256 pseudonyms before analyst/review access. Public logs do not print accepted player identifiers.
+The restricted raw tier contains durable DayZ identifiers because the server must bind RPCs, join events and support identity deletion. Normalisation converts player sessions, durable IDs and known payload identity fields to deterministic pseudonyms before analyst/review access.
+
+Production deployments must configure:
+
+```text
+DBA_PSEUDONYM_SECRET=<stable random value of at least 32 bytes>
+DBA_PSEUDONYM_KEY_ID=<operator-managed key identifier, for example production-v1>
+```
+
+Pseudonyms use HMAC-SHA-256 with domain prefixes:
+
+```text
+dp_<digest>  durable player identity
+ps_<digest>  player session identity
+```
+
+The database stores the pseudonym policy version and key ID. Startup/migration fails when the process policy differs from the database policy; a key cannot be changed silently because doing so would create a second identity namespace and break joins/deletion. Key rotation therefore requires an explicit data migration or a deliberate reset of development data.
+
+Databases containing identities created before the keyed policy are marked `sha256-unkeyed-development-v1 / legacy-unkeyed`. Configure keyed pseudonyms before first migration on a new production database. Existing legacy development data must be intentionally migrated or cleared before enabling a key.
+
+When no pseudonym secret is configured, commands retain the legacy unkeyed development policy and report that limitation. This mode is not suitable for production because Steam IDs can be dictionary-matched.
 
 Pseudonyms reduce routine exposure; they are not anonymisation. Access controls and retention still apply.
+
+## Migration integrity
+
+Migration filenames and SHA-256 checksums are recorded in `schema_migrations`. A previously applied migration whose contents change causes migration failure. Existing migration rows without a checksum are adopted once using the repository version present during the first upgraded run; subsequent changes fail closed.
+
+Never edit an applied migration. Add a new numbered migration.
 
 ## Retention
 
@@ -43,9 +69,13 @@ After approval:
 go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-id>' -actor '<operator>' -reason '<request-id>' -execute
 ```
 
-Execution removes matching raw events, deletes empty raw batches, rewrites mixed batches through a same-directory backup/replace sequence, removes subject-level normalized/review data and records only a one-way subject pseudonym in `privacy_audit_log`. Re-run normalization after deletion if mixed batches were rewritten.
+Execution removes events where the subject is the event owner, observer, target, combat source or nested player-session reference. It deletes empty raw batches, rewrites mixed batches through a same-directory backup/replace sequence, removes subject-level normalized/review data and records only the keyed durable pseudonym in `privacy_audit_log`. Re-run normalization after deletion if mixed batches were rewritten.
 
 Backups, database snapshots and external log retention must follow the same deletion policy; the command cannot erase copies outside the configured raw root and database.
+
+## Clock-integrity boundary
+
+Each client clock response must match one outstanding server-issued challenge containing the exact sequence and server-send timestamp. Challenges expire after ten seconds and are consumed once, including failed attempts. Clock quality may suppress timing-sensitive evidence but can never strengthen suspicion.
 
 ## Review safety
 
