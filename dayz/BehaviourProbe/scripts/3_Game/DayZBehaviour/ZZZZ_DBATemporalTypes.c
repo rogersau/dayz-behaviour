@@ -25,6 +25,9 @@ modded class DBAProbeRequest
 {
     int diagnostic_window_end_ms;
     int diagnostic_interval_ms;
+    int decision_event_lower_ms;
+    int decision_event_upper_ms;
+    string decision_timing_source;
 };
 
 modded class DBAProbeRuntime
@@ -93,8 +96,8 @@ modded class DBAProbeRuntime
         float uncertaintyMS;
         if (GetLatestClockEstimate(playerID, offsetMS, uncertaintyMS))
         {
-            edge.server_event_lower_ms = clientLowerMS + offsetMS - uncertaintyMS;
-            edge.server_event_upper_ms = clientUpperMS + offsetMS + uncertaintyMS;
+            edge.server_event_lower_ms = Math.Max(0, Math.Floor(clientLowerMS + offsetMS - uncertaintyMS));
+            edge.server_event_upper_ms = Math.Max(edge.server_event_lower_ms, Math.Ceil(clientUpperMS + offsetMS + uncertaintyMS));
             edge.timing_source = "ALIGNED_CLIENT_INTERVAL";
         }
         else
