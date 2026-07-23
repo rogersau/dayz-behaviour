@@ -61,6 +61,28 @@ func TestPossibleFootstepIsVisibleButDoesNotSuppress(t *testing.T) {
 	}
 }
 
+func TestFutureObserverPositionCannotCreateAudioCue(t *testing.T) {
+	items := []observations.Observation{{
+		ServerID: "server", ServerSessionID: "session", ObserverPlayerSessionID: "session:1:observer",
+		TargetPlayerSessionID: "session:2:target", StartedMS: 10_000, CueClass: "UNEXPLAINED_IN_CAPTURED_DATA",
+	}}
+	batches := []schema.Batch{{
+		SchemaVersion: 1, ServerID: "server", ServerSessionID: "session", BatchSequence: 1,
+		Events: []schema.Event{
+			event("SHOT_FIRED_SERVER", "target-shot", 9_000, "session:2:target", map[string]any{
+				"source_player_id": "target", "position": []float64{0, 0, 100}, "weapon_type": "M4A1", "is_suppressed": false,
+			}),
+			event("PLAYER_SNAPSHOT", "future-observer-position", 9_500, "session:1:observer", map[string]any{"position": []float64{0, 0, 0}}),
+		},
+	}}
+	if err := cues.Enrich(items, batches, cues.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if len(items[0].CueFacts) != 0 || items[0].CueClass != "UNEXPLAINED_IN_CAPTURED_DATA" {
+		t.Fatalf("future position created a cue: %+v", items[0])
+	}
+}
+
 func event(eventType, id string, atMS int64, playerSessionID string, value any) schema.Event {
 	payload, _ := json.Marshal(value)
 	return schema.Event{
