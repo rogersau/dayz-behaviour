@@ -202,7 +202,6 @@ func countDroppedRandomOpportunities(batches []schema.Batch) int {
 				count++
 			}
 		}
-	}
 	return count
 }
 
@@ -216,7 +215,13 @@ func estimatePreExposureForSessions(sessionIDs []string, built []observations.Ob
 		if _, ok := eligible[observation.ObserverPlayerSessionID]; !ok || observation.FirstExposureMS == 0 || !observation.StrongHiddenEligible || !observation.Independent || observation.CueClass != "UNEXPLAINED_IN_CAPTURED_DATA" {
 			continue
 		}
-		incidents = append(incidents, features.PreExposureIncident{ReadinessMS: observation.OutcomeObservedMS, ExposureMS: observation.FirstExposureMS, Censored: observation.ExposureWindowCensored})
+		incidents = append(incidents, features.PreExposureIncident{
+			ReadinessLowerMS: observation.OutcomeLowerMS,
+			ReadinessUpperMS: observation.OutcomeUpperMS,
+			ExposureLowerMS:  observation.FirstExposureLowerMS,
+			ExposureUpperMS:  observation.FirstExposureUpperMS,
+			Censored:         observation.ExposureWindowCensored,
+		})
 	}
 	return features.EstimatePreExposure(incidents)
 }
