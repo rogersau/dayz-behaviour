@@ -39,7 +39,7 @@ func main() {
 	if !*execute {
 		printJSON(map[string]any{
 			"mode": "dry-run", "rows_to_rebuild": scope,
-			"preserved": []string{"restricted raw batch files", "raw_batches metadata", "privacy_audit_log"},
+			"preserved":    []string{"restricted raw batch files", "raw_batches metadata", "privacy_audit_log"},
 			"execute_with": "-execute -confirm " + confirmation,
 		})
 		return
@@ -71,7 +71,7 @@ func main() {
 		"mode": "executed", "cleared_rows": cleared,
 		"replayed_batches": replayStats.Batches, "replayed_events": replayStats.Events,
 		"normalization_checkpoint_removed": checkpointRemoved,
-		"next_step": "run cmd/analyse to rebuild features, rankings, and review cases",
+		"next_step":                        "run cmd/analyse to rebuild features, rankings, and review cases",
 	})
 }
 
