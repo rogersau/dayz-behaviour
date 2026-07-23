@@ -437,17 +437,11 @@ func insertVisibilityProbe(ctx context.Context, tx *sql.Tx, sourceEventID, obser
 }
 
 func pseudonymousSessionID(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	return "ps_" + digest(raw)
+	return identity.SessionID(raw)
 }
 
 func pseudonymousDurableID(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	return "dp_" + digest(raw)
+	return identity.DurableID(raw)
 }
 
 func rawDurableID(sessionID string) string {
