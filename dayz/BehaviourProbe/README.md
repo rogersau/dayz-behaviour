@@ -2,7 +2,7 @@
 
 This directory contains the client/server DayZ mod used by [DayZ Behaviour](../../README.md).
 
-The mod captures bounded game telemetry and sends it to the external Go ingest service. It does not analyze long-term player behaviour, assign review tiers, or perform enforcement inside DayZ.
+The mod captures bounded game telemetry and sends it to the external Go ingest service. It does not analyze long-term player behaviour, assign review tiers, record raw audio, or perform enforcement inside DayZ.
 
 ## Load both sides
 
@@ -11,7 +11,7 @@ Pack and sign this directory using the normal mod process for your server. Load 
 - the dedicated server;
 - every connecting client.
 
-The client side captures camera and control-state context. The server side owns identity, lifecycle, combat, authoritative position, visibility geometry, batching, export, and spool recovery. A one-sided deployment is incomplete.
+The client side captures camera and control-state context. The server side owns direct identity, lifecycle, combat, authoritative position, gunshot and movement-audio opportunities, visibility geometry, batching, export, and spool recovery. A one-sided deployment is incomplete.
 
 The mod uses project-owned RPC IDs `759430` through `759436`. Confirm they do not conflict with another loaded mod.
 
@@ -45,6 +45,9 @@ The mod captures:
 
 - bounded client camera/control samples and transition intervals;
 - authoritative server lifecycle, movement, combat, and position events;
+- successful server-side shot opportunities through `Weapon_Base.EEFired`;
+- suppressor, weapon, ammunition, shooter, time, and position context;
+- bounded movement-audio opportunities containing speed, gait, stance, surface, footwear, and position;
 - randomized prospective sampling opportunities;
 - neutral no-relevant-target controls;
 - optional bounded visibility and event-enrichment probes;
@@ -52,6 +55,38 @@ The mod captures:
 - collector, queue, export, and spool health.
 
 Failed asynchronous exports are written to bounded NDJSON spool files for later import by `ingestd`.
+
+## Audio opportunity settings
+
+Audio opportunity capture is enabled by default:
+
+```json
+{
+  "enable_audio_cues": true,
+  "audio_context_interval_seconds": 0.5,
+  "audio_min_movement_speed_mps": 0.25
+}
+```
+
+The server does not decide whether a player heard a cue. It only exports the authoritative facts needed by Go analysis to estimate audibility.
+
+The initial implementation relies on Enfusion/DayZ script surfaces used by the base game:
+
+- `Weapon_Base.EEFired(int muzzleType, int mode, string ammoType)` for successful fire events;
+- `Weapon_Base.GetAttachedSuppressor()` for suppressor context;
+- `GetVelocity(player)` and `HumanMovementState` for movement context;
+- `GetGame().SurfaceGetType3D(...)` for surface type;
+- `FindAttachmentBySlotName("Feet")` for footwear type.
+
+These callbacks and values must be verified on the exact dedicated-server build and loaded mod set. Another mod that replaces the same callback without chaining `super` can prevent collection.
+
+The movement interval is bounded server work. Lowering it increases event volume for every moving player. Do not change it without measuring script time, export size, queue loss, and analysis value at representative population.
+
+## Direct identities
+
+The server uses `PlayerIdentity.GetId()` and includes the durable player ID in player-session identifiers. Normalization and review preserve those values so administrators can cross-reference Steam and external moderation systems.
+
+This means raw, normalized, and review data is directly attributable. Restrict access to the data plane, explorer, API, logs, exports, and backups.
 
 ## Visibility safety
 
@@ -68,8 +103,21 @@ Strong concealed-target evidence may be enabled only when:
 
 Third-person or unknown-perspective head-origin rays remain descriptive context and must not become strong hidden evidence.
 
+## Runtime checks
+
+Before using the new audio cues:
+
+1. Verify the scripts compile and load on the target DayZ build.
+2. Fire suppressed and unsuppressed weapons and confirm exactly one `SHOT_FIRED_SERVER` event per expected server callback.
+3. Test automatic/burst, multi-muzzle, modded weapons, reconnects, and weapon attachments.
+4. Walk, jog, sprint, crouch, and prone over representative surfaces and verify movement events.
+5. Confirm footwear and surface values are sensible.
+6. Measure event and byte volume at representative player count.
+7. Compare the external audibility model with controlled listening tests.
+
 ## Further documentation
 
 - [Deployment](../../docs/deployment.md)
 - [Architecture](../../docs/architecture.md)
+- [Analysis and review](../../docs/analysis-and-review.md)
 - [Operations, security, and privacy](../../docs/operations.md)
