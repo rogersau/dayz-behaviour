@@ -8,7 +8,7 @@ The analysis asks a narrow question:
 
 It does not estimate the probability that a player is cheating. It produces evidence summaries and review-priority tiers so administrators can decide which sessions deserve manual inspection.
 
-A plausible legitimate explanation may exist for every highlighted incident. Examples include sound, team communication, prior visual contact, map knowledge, prediction, or information that the collector did not capture.
+A plausible legitimate explanation may exist for every highlighted incident. Examples include sound, team communication, prior visual contact, map knowledge, prediction, stream sniping, or information that the collector did not capture.
 
 ## From events to observations
 
@@ -16,12 +16,12 @@ Raw telemetry is not counted directly as evidence. The observation builder creat
 
 Each observation records:
 
-- the observer and, where applicable, target session;
+- the direct observer identity and, where applicable, target session;
 - server and server-session identity;
 - map, coarse area, movement, stance, weapon state, and population context;
 - sampling stream, inclusion probability, admission probability, and queue delay;
 - visibility class and authority;
-- captured cues before the opportunity;
+- captured cue facts before the opportunity;
 - whether a qualifying readiness transition occurred inside the decision window;
 - lower and upper timing bounds;
 - independence, timing, hidden, neutral-control, and positive-control eligibility;
@@ -60,27 +60,81 @@ The transition remains Tier B client context even after clock alignment. The hid
 
 ## Cue ledger
 
-Before calling an opportunity unexplained, the builder searches captured prior events for plausible cues.
+Before calling an opportunity unexplained, analysis searches captured prior events for plausible cues.
 
-Examples include:
+The cue ledger includes:
 
 - recent exposed or partially exposed visibility;
 - recent combat contact attributed to the target;
-- other captured context that a policy version marks as known or plausible.
+- server-derived gunshot audibility opportunities;
+- server-derived movement and footstep audibility opportunities;
+- other captured context added by a future cue-policy version.
 
 The resulting cue classes are:
 
-- `KNOWN` — captured data contains a direct explanation;
+- `KNOWN` — captured data contains a direct and strong explanation;
 - `PLAUSIBLE` — captured data contains a reasonable indirect explanation;
-- `UNEXPLAINED_IN_CAPTURED_DATA` — the collector did not record an explanation.
+- `UNEXPLAINED_IN_CAPTURED_DATA` — the collector did not record a qualifying explanation.
 
 “Unexplained” does not mean impossible or illegitimate. It means only that the retained telemetry did not capture the explanation.
 
 Primary readiness features use independent observations in the unexplained class. Known and plausible observations remain available in the timeline for review.
 
+## Audio cues without raw audio
+
+The system records no microphone input and no raw game audio. It derives an **audibility opportunity** from game state.
+
+### Gunshot cues
+
+For a server-recorded shot, analysis uses:
+
+- shooter and observer positions;
+- distance and bearing;
+- shot time;
+- weapon and ammunition type;
+- suppressor state and type;
+- the versioned gunshot range model.
+
+The initial model applies separate conservative range bands for suppressed and unsuppressed shots.
+
+### Footstep cues
+
+For a moving target, analysis uses:
+
+- authoritative position;
+- velocity-derived speed and coarse gait;
+- stance;
+- terrain or surface type;
+- footwear attachment type;
+- observer distance and bearing;
+- the versioned footstep range model.
+
+This is less certain than a gunshot because the server-side model does not reproduce the full DayZ audio engine, building acoustics, exact animation sound events, weather masking, ambient noise, hearing damage, or local volume settings.
+
+### Audibility classifications
+
+Audio facts use:
+
+| Classification | Interpretation |
+|---|---|
+| `CAPTURED_STRONG_CUE` | A strong server-derived opportunity, such as a nearby unsuppressed shot |
+| `LIKELY_AUDIO_CUE` | The event was likely audible under ordinary conditions |
+| `POSSIBLE_AUDIO_CUE` | It could have been audible, but the model is not strong enough to explain the observation automatically |
+| `NOT_AUDIBLE_BY_MODEL` | The event is outside the configured model range or lacks usable context |
+
+Strong gunshots can produce `KNOWN`. Likely gunshots or footsteps can produce `PLAUSIBLE`. Possible audio remains in the evidence package but does not automatically remove an observation from primary analysis.
+
+This language is intentional. The system can say:
+
+> A plausible audible cue existed.
+
+It cannot say:
+
+> The player definitely heard and localized the cue.
+
 ## Primary feature: hidden-threat readiness
 
-For each durable player identity, the analyzer counts:
+For each direct durable player identity, the analyzer counts:
 
 - hidden successes and hidden trials;
 - neutral-control successes and control trials;
@@ -178,20 +232,21 @@ These values are policy, not universal scientific constants. A deployment should
 
 A reviewer should not look only at the tier or the strongest incident. Review the full evidence package:
 
-1. **Data quality** — hidden, neutral, visible-positive, and dropped-opportunity counts; clock uncertainty; collector losses.
-2. **Breadth** — sessions, encounters, targets, and whether one period dominates.
-3. **Effect uncertainty** — point estimates, lower bounds, matched-model convergence, and stability diagnostics.
-4. **Cue history** — prior exposure, combat, nearby activity, and uncaptured-information limitations.
-5. **Timeline** — authoritative positions and combat facts, client transitions, visibility probes, and source authority.
-6. **Spatial context** — route, related players, camera context, and coarse visibility cells.
-7. **Alternative explanations** — audio, squad communication, prediction, map knowledge, stream sniping, or telemetry gaps.
-8. **Conventional evidence** — server logs, existing anti-cheat evidence, player reports, and video where available.
+1. **Identity** — direct DayZ/Steam player ID and the affected player sessions.
+2. **Data quality** — hidden, neutral, visible-positive, audio-cue, and dropped-opportunity counts; clock uncertainty; collector losses.
+3. **Breadth** — sessions, encounters, targets, and whether one period dominates.
+4. **Effect uncertainty** — point estimates, lower bounds, matched-model convergence, and stability diagnostics.
+5. **Cue history** — prior exposure, combat, gunshots, inferred footsteps, nearby activity, and uncaptured-information limitations.
+6. **Timeline** — authoritative positions and combat facts, client transitions, visibility probes, audio opportunities, and source authority.
+7. **Spatial context** — route, related players, cue direction/distance, camera context, and coarse visibility cells.
+8. **Alternative explanations** — audio, squad communication, prediction, map knowledge, stream sniping, or telemetry gaps.
+9. **Conventional evidence** — server logs, existing anti-cheat evidence, player reports, and video where available.
 
 The review result should describe observable behaviour and uncertainty. It should not convert the model output into a cheat probability.
 
 ## Admin explorer
 
-The browser explorer lists pseudonymized sessions and reconstructs ordered timelines from normalized PostgreSQL data.
+The browser explorer lists direct player/session identifiers and reconstructs ordered timelines from normalized PostgreSQL data. The direct ID can be copied into other moderation, Steam, BattleMetrics, ban, or ticket systems.
 
 Spatial evidence is rendered with different provenance:
 
@@ -204,14 +259,19 @@ Captured `map_id` takes precedence. If the required map is unavailable, the expl
 
 Timeline requests are capped at 2,000 entries. Larger sessions should be divided with `from_ms` and `to_ms` while preserving ordering context.
 
+Direct identities make explorer screenshots and exports more sensitive. Do not attach them to public tickets or share them outside the administrator boundary unless operational policy allows it.
+
 ## Review API concepts
 
 The review service stores:
 
+- direct durable player IDs;
 - versioned candidate rankings;
 - review cases for eligible tiers;
 - audited reviewer dispositions;
 - evidence component values and source incident IDs.
+
+The API exposes `player_id`. A legacy `player_pseudonym` field may remain temporarily for client compatibility but contains the same direct identity.
 
 A reviewer disposition is operational feedback, not perfect ground truth. It should not be fed back into model calibration without a documented labeling and quality-control process.
 
@@ -222,6 +282,7 @@ No review candidate may mean:
 - visibility probing is disabled;
 - first-person validation is not configured;
 - no neutral controls were collected;
+- known or plausible cues explained the eligible incidents;
 - timing or queue delays exceeded policy;
 - the player did not meet breadth gates;
 - the matched model did not converge;
@@ -237,7 +298,8 @@ The analysis does not:
 
 - detect or name cheat software;
 - prove that an individual incident was impossible legitimately;
-- recreate audio or every rendered visibility condition;
+- record or recreate raw audio;
+- guarantee that an inferred audio opportunity was actually heard;
 - infer communications outside the collected game state;
 - replace human investigation;
 - trigger a ban, kick, warning, or other gameplay action.
