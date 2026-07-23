@@ -8,7 +8,8 @@ modded class DBAProbeServerConfig
 modded class DBAProbeWirePayload
 {
     string weapon_type;
-    int muzzle_index;
+    int muzzle_type;
+    int fire_mode;
     bool is_suppressed;
     string suppressor_type;
     string surface_type;
@@ -19,7 +20,8 @@ modded class DBAProbeWirePayload
 modded class DBAProbeCombatEvent
 {
     string weapon_type;
-    int muzzle_index;
+    int muzzle_type;
+    int fire_mode;
     bool is_suppressed;
     string suppressor_type;
     vector world_position;
