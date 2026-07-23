@@ -48,7 +48,8 @@ modded class MissionServer
             payload.model_position = eventData.model_position;
             payload.speed_coefficient = eventData.speed_coefficient;
             payload.weapon_type = eventData.weapon_type;
-            payload.muzzle_index = eventData.muzzle_index;
+            payload.muzzle_type = eventData.muzzle_type;
+            payload.fire_mode = eventData.fire_mode;
             payload.is_suppressed = eventData.is_suppressed;
             payload.suppressor_type = eventData.suppressor_type;
             if (eventData.event_type == "SHOT_FIRED_SERVER")
