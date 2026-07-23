@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/rogersau/dayz-behaviour/internal/identity"
 	"github.com/rogersau/dayz-behaviour/pkg/schema"
 )
 
@@ -81,7 +82,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 		{"review_dispositions", `DELETE FROM review_dispositions WHERE review_case_id IN (SELECT rc.review_case_id FROM review_cases rc JOIN candidate_rankings cr USING(candidate_ranking_id) WHERE cr.durable_player_id=$1)`},
 		{"review_cases", `DELETE FROM review_cases WHERE candidate_ranking_id IN (SELECT candidate_ranking_id FROM candidate_rankings WHERE durable_player_id=$1)`},
 		{"candidate_rankings", `DELETE FROM candidate_rankings WHERE durable_player_id=$1`},
-		{"feature_results", `DELETE FROM feature_results WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
+		{"feature_results", `DELETE FROM feature_results WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR player_session_id=$1`},
 		{"matched_control_sets", `DELETE FROM matched_control_sets WHERE observation_id IN (SELECT ao.observation_id FROM analysis_observations ao JOIN decision_windows dw USING(decision_window_id) JOIN sampling_opportunities so USING(opportunity_id) WHERE so.observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR so.target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
 		{"analysis_observations", `DELETE FROM analysis_observations WHERE decision_window_id IN (SELECT dw.decision_window_id FROM decision_windows dw JOIN sampling_opportunities so USING(opportunity_id) WHERE so.observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR so.target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
 		{"decision_windows", `DELETE FROM decision_windows WHERE opportunity_id IN (SELECT opportunity_id FROM sampling_opportunities WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`},
@@ -89,7 +90,7 @@ func (s *Store) DeletePlayer(ctx context.Context, durablePlayerID, actor, reason
 		{"observer_target_episodes", `DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 		{"visibility_probe_runs", `DELETE FROM visibility_probe_runs WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 		{"sampling_opportunities", `DELETE FROM sampling_opportunities WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
-		{"normalized_events", `DELETE FROM normalized_events WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'observer_player_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'target_player_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'source_player_id'=$1`},
+		{"normalized_events", `DELETE FROM normalized_events WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'observer_player_session_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'target_player_session_id' IN (SELECT player_session_id FROM deletion_sessions) OR payload->>'observer_player_id'=$1 OR payload->>'target_player_id'=$1 OR payload->>'source_player_id'=$1 OR payload->>'player_id'=$1`},
 		{"player_sessions", `DELETE FROM player_sessions WHERE player_session_id IN (SELECT player_session_id FROM deletion_sessions)`},
 	}
 	for _, query := range queries {
@@ -197,6 +198,13 @@ func (s *Store) ApplyRetention(ctx context.Context, cutoffs RetentionCutoffs, ex
 }
 
 func (s *Store) Migrate(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), checksum_sha256 text NOT NULL DEFAULT '')`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum_sha256 text NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+
 	entries, err := fs.ReadDir(migrationFiles, "migrations")
 	if err != nil {
 		return err
@@ -210,12 +218,50 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		sum := sha256.Sum256(data)
+		checksum := hex.EncodeToString(sum[:])
+		var storedChecksum string
+		err = s.db.QueryRowContext(ctx, `SELECT checksum_sha256 FROM schema_migrations WHERE version=$1`, entry.Name()).Scan(&storedChecksum)
+		switch {
+		case err == nil:
+			if storedChecksum == "" {
+				if _, err := s.db.ExecContext(ctx, `UPDATE schema_migrations SET checksum_sha256=$2 WHERE version=$1`, entry.Name(), checksum); err != nil {
+					return err
+				}
+				continue
+			}
+			if storedChecksum != checksum {
+				return fmt.Errorf("migration checksum mismatch for %s", entry.Name())
+			}
+			continue
+		case err != sql.ErrNoRows:
+			return err
+		}
+
 		if _, err := s.db.ExecContext(ctx, string(data)); err != nil {
 			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
 		}
-		if _, err := s.db.ExecContext(ctx, "INSERT INTO schema_migrations(version) VALUES($1) ON CONFLICT DO NOTHING", entry.Name()); err != nil {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations(version,checksum_sha256) VALUES($1,$2)`, entry.Name(), checksum); err != nil {
 			return err
 		}
+	}
+	return s.ensurePseudonymPolicy(ctx)
+}
+
+func (s *Store) ensurePseudonymPolicy(ctx context.Context) error {
+	policy, err := identity.CurrentPolicy()
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO pseudonym_policy_state(singleton,policy_version,key_id) VALUES(true,$1,$2) ON CONFLICT(singleton) DO NOTHING`, policy.Version, policy.KeyID); err != nil {
+		return err
+	}
+	var storedVersion, storedKeyID string
+	if err := s.db.QueryRowContext(ctx, `SELECT policy_version,key_id FROM pseudonym_policy_state WHERE singleton=true`).Scan(&storedVersion, &storedKeyID); err != nil {
+		return err
+	}
+	if storedVersion != policy.Version || storedKeyID != policy.KeyID {
+		return fmt.Errorf("pseudonym policy mismatch: database uses %s/%s, process uses %s/%s", storedVersion, storedKeyID, policy.Version, policy.KeyID)
 	}
 	return nil
 }
@@ -267,7 +313,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 				authority = schema.AuthorityClient
 			}
 		}
-		payload, fields, err := normalizePayload(batch, event.Payload)
+		payload, fields, err := normalizePayload(event.Payload)
 		if err != nil {
 			return fmt.Errorf("normalize payload %s: %w", sourceEventID, err)
 		}
@@ -278,7 +324,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 				source, source_authority, source_component, source_schema_version, collector_version,
 				server_sequence, server_time_ms, server_receive_ms, player_session_id,
 				client_sequence, client_monotonic_time_ms, payload, normalized_event_schema_version
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'v1')
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'v2-keyed-identities')
 			ON CONFLICT (source_event_id) DO NOTHING`,
 			sourceEventID, batch.ServerID, batch.ServerSessionID, batch.BatchSequence, event.EventType,
 			event.Source, authority, event.SourceComponent, event.SourceSchemaVersion, event.CollectorVersion,
@@ -304,8 +350,16 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 				return err
 			}
 		}
-		if event.EventType == "VISIBILITY_OBSERVATION" {
-			if err := insertSamplingAndVisibility(ctx, tx, sourceEventID, playerSessionID, fields); err != nil {
+		switch event.EventType {
+		case "VISIBILITY_OBSERVATION":
+			if err := insertSamplingOpportunity(ctx, tx, sourceEventID, playerSessionID, fields); err != nil {
+				return err
+			}
+			if err := insertVisibilityProbe(ctx, tx, sourceEventID, playerSessionID, fields); err != nil {
+				return err
+			}
+		case "SAMPLING_OPPORTUNITY", "SAMPLING_OPPORTUNITY_DROPPED":
+			if err := insertSamplingOpportunity(ctx, tx, sourceEventID, playerSessionID, fields); err != nil {
 				return err
 			}
 		}
@@ -313,7 +367,7 @@ func (s *Store) Accept(ctx context.Context, batch schema.Batch) error {
 	return tx.Commit()
 }
 
-func normalizePayload(batch schema.Batch, raw json.RawMessage) (json.RawMessage, map[string]any, error) {
+func normalizePayload(raw json.RawMessage) (json.RawMessage, map[string]any, error) {
 	fields := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &fields); err != nil {
@@ -325,12 +379,7 @@ func normalizePayload(batch schema.Batch, raw json.RawMessage) (json.RawMessage,
 			fields[key] = pseudonymousSessionID(value)
 		}
 	}
-	for _, key := range []string{"observer_player_id", "target_player_id"} {
-		if value := stringField(fields, key); value != "" {
-			fields[key] = pseudonymousSessionID(batch.ServerSessionID + ":" + value)
-		}
-	}
-	for _, key := range []string{"source_player_id", "player_id"} {
+	for _, key := range []string{"observer_player_id", "target_player_id", "source_player_id", "player_id"} {
 		if value := stringField(fields, key); value != "" {
 			fields[key] = pseudonymousDurableID(value)
 		}
@@ -339,11 +388,15 @@ func normalizePayload(batch schema.Batch, raw json.RawMessage) (json.RawMessage,
 	return payload, fields, err
 }
 
-func insertSamplingAndVisibility(ctx context.Context, tx *sql.Tx, sourceEventID, observerSessionID string, fields map[string]any) error {
+func insertSamplingOpportunity(ctx context.Context, tx *sql.Tx, sourceEventID, observerSessionID string, fields map[string]any) error {
 	opportunityID := sourceEventID
 	targetSessionID := stringField(fields, "target_player_session_id")
 	if targetSessionID == "" {
 		targetSessionID = stringField(fields, "target_player_id")
+	}
+	var target any
+	if targetSessionID != "" {
+		target = targetSessionID
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO sampling_opportunities(
@@ -353,12 +406,20 @@ func insertSamplingAndVisibility(ctx context.Context, tx *sql.Tx, sourceEventID,
 			queue_admission_probability,scheduler_load_state,queue_delay_ms,drop_reason)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT(opportunity_id) DO NOTHING`,
-		opportunityID, sourceEventID, observerSessionID, targetSessionID, stringField(fields, "sampling_stream"),
+		opportunityID, sourceEventID, observerSessionID, target, stringField(fields, "sampling_stream"),
 		stringField(fields, "sampling_policy_version"), stringField(fields, "sampling_reason"), intField(fields, "observer_eligible_count"), floatField(fields, "observer_inclusion_probability"),
 		intField(fields, "target_eligible_count"), floatField(fields, "target_inclusion_probability"), stringField(fields, "risk_set_definition"), boolField(fields, "risk_set_complete"),
 		floatField(fields, "queue_admission_probability"), stringField(fields, "scheduler_load_state"), intField(fields, "queue_delay_ms"), stringField(fields, "drop_reason"))
-	if err != nil {
-		return err
+	return err
+}
+
+func insertVisibilityProbe(ctx context.Context, tx *sql.Tx, sourceEventID, observerSessionID string, fields map[string]any) error {
+	targetSessionID := stringField(fields, "target_player_session_id")
+	if targetSessionID == "" {
+		targetSessionID = stringField(fields, "target_player_id")
+	}
+	if targetSessionID == "" {
+		return fmt.Errorf("visibility probe %s has no target identity", sourceEventID)
 	}
 	evidence, err := json.Marshal(fields)
 	if err != nil {
@@ -397,8 +458,7 @@ func rawDurableID(sessionID string) string {
 }
 
 func digest(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
+	return identity.MustDigest(value)
 }
 
 func stringField(fields map[string]any, key string) string {
