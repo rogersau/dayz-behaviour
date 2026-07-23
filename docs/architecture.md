@@ -4,12 +4,13 @@
 
 DayZ Behaviour collects a deliberately limited set of game observations and uses them to identify repeated hidden-awareness patterns for manual administrator review.
 
-The system is designed around four constraints:
+The system is designed around five constraints:
 
 1. DayZ collection must remain bounded and should not perform historical analysis in the game loop.
 2. Server-authoritative facts and untrusted client context must remain distinguishable.
-3. Uncertainty and missing information must reduce confidence rather than create suspicion.
-4. Historical data and algorithm versions must remain replayable and auditable.
+3. Plausible legitimate explanations must be retained alongside suspicious-looking behaviour.
+4. Uncertainty and missing information must reduce confidence rather than create suspicion.
+5. Historical data and algorithm versions must remain replayable and auditable.
 
 It is not designed to identify cheat software, prove the presence of DMA hardware, reproduce a player’s rendered screen or audio, or automatically enforce a punishment.
 
@@ -19,10 +20,12 @@ It is not designed to identify cheat software, prove the presence of DMA hardwar
 ┌──────────────────────── DayZ process ────────────────────────┐
 │                                                              │
 │  Client collector                   Server collector          │
-│  - camera direction                 - identity and sessions   │
+│  - camera direction                 - direct player identity  │
 │  - raised/ADS/optics state          - lifecycle and combat    │
 │  - transition intervals             - authoritative position  │
-│  - collector health                 - bounded visibility       │
+│  - collector health                 - gunshot opportunities   │
+│                                     - movement audio context  │
+│                                     - bounded visibility       │
 │           │                                   │               │
 │           └──────── authenticated RPC ────────┘               │
 │                                               │               │
@@ -36,8 +39,9 @@ It is not designed to identify cheat software, prove the presence of DMA hardwar
                          ┌──────────────────────┴───────────────────┐
                          ▼                                          ▼
                      normalize                                  analyse
-                         │                                          │
-                  PostgreSQL records                      observations/features
+                         │                                  - observations
+                  PostgreSQL records                       - audio cues
+                         │                                  - features
                          └──────────────────────┬───────────────────┘
                                                 ▼
                                             reviewd
@@ -62,9 +66,10 @@ This data is useful for reconstructing behaviour, but it is not trusted as proof
 
 The server collector owns the authoritative game-side context:
 
-- player identity and player-session lifecycle;
+- direct DayZ/Steam identity and player-session lifecycle;
 - authoritative position, movement, alive, and unconscious state;
 - hit, kill, and server-side fire events where the script seam is valid;
+- movement-audio opportunities containing speed, stance, surface, footwear, and position;
 - random prospective sampling opportunities;
 - bounded observer/target visibility probes;
 - clock challenges, queue health, export health, and spool state.
@@ -87,7 +92,7 @@ The DayZ query token exists because `RestContext` cannot set a general authoriza
 
 `normalize` replays immutable raw batches into PostgreSQL. It:
 
-- converts known identity fields into deterministic pseudonyms;
+- preserves direct durable-player and player-session identifiers;
 - stores events, sessions, sampling opportunities, visibility runs, and analysis inputs;
 - preserves source authority and algorithm/schema versions;
 - applies database migrations and verifies migration checksums.
@@ -96,9 +101,9 @@ Normalization is idempotent. Raw files remain the source of truth for replay.
 
 ### `analyse`
 
-`analyse` rebuilds observations from raw telemetry, calculates features, applies validation gates, and optionally persists results to PostgreSQL.
+`analyse` rebuilds observations from raw telemetry, enriches them with captured cue facts, calculates features, applies validation gates, and optionally persists results to PostgreSQL.
 
-The primary feature family compares reactions during validated concealed-target opportunities with reactions during neutral no-relevant-target opportunities. Other feature families are supporting context and do not independently establish a review tier.
+The primary feature family compares reactions during validated concealed-target opportunities with reactions during neutral no-relevant-target opportunities. Audio cues and other legitimate explanations are applied before the primary unexplained-observation filters.
 
 ### `reviewd`
 
@@ -106,7 +111,7 @@ The primary feature family compares reactions during validated concealed-target 
 
 - a Steam-authenticated browser explorer;
 - bearer-authenticated review APIs;
-- pseudonymized session search;
+- direct player and player-session identifiers for cross-reference;
 - ordered timelines with authority and payload context;
 - local DayZ map tiles and spatial evidence;
 - review cases and audited dispositions.
@@ -119,7 +124,7 @@ Events retain an authority tier throughout ingestion, normalization, analysis, a
 
 | Tier | Meaning | Examples |
 |---|---|---|
-| A | Server-authoritative game fact | lifecycle, server position, combat callback, visibility geometry |
+| A | Server-authoritative game fact | lifecycle, position, movement, combat callback, visibility geometry |
 | B | Untrusted client observation | camera sample, ADS/optics transition, local timing interval |
 | C | Collector or pipeline health | queue depth, drops, export failures, clock quality |
 
@@ -129,18 +134,87 @@ Tier C data never strengthens a player signal. Missing data, excessive timing un
 
 ## Identity and sessions
 
-The raw tier contains durable DayZ identity because the server needs it for attribution, joining, reconnect handling, and deletion.
+The server records the durable DayZ identity returned by `PlayerIdentity.GetId()`. For Steam deployments this is normally the SteamID64 used by other server and moderation systems.
 
-The server assigns a distinct `player_session_id` for each connected character/session lifecycle. Client sequence and rate-limit state is reset when the player disconnects or reconnects, so a restarted collector can safely begin its sequences again.
-
-Normalized and review data uses two pseudonym domains:
+The server also assigns a distinct `player_session_id` for each connected character/session lifecycle:
 
 ```text
-dp_<HMAC-SHA256>  durable player identity
-ps_<HMAC-SHA256>  player-session identity
+<server-session-id>:<session-sequence>:<durable-player-id>
 ```
 
-The pseudonym policy and key ID are stored in PostgreSQL. A process using a different key fails closed because silently changing identity namespaces would break joins and deletion.
+Client sequence and rate-limit state is reset when the player disconnects or reconnects, so a restarted collector can safely begin its sequences again.
+
+Direct identities are preserved in normalized and review data. This makes operational cross-reference straightforward, but it also means the following are sensitive personal data:
+
+- PostgreSQL tables;
+- review API responses;
+- explorer screenshots and exports;
+- raw batches and logs;
+- backups and copied reports.
+
+Access control and retention are therefore the privacy boundary; pseudonymization is no longer used.
+
+### Upgrading from pseudonymized data
+
+One-way historical pseudonyms cannot be converted back to Steam IDs. The supported transition is:
+
+1. retain and back up restricted raw batches;
+2. dry-run `cmd/direct-identity-rebuild`;
+3. clear derived normalized/review data through the command;
+4. switch the database identity policy to `direct-identifiers-v1`;
+5. replay raw batches;
+6. rerun analysis.
+
+Review dispositions stored only in cleared derived tables are not recreated by raw replay.
+
+## Audio-cue model
+
+The system does not record microphone, game-mix, or raw audio samples.
+
+Instead, it creates server-derived **audio opportunities**.
+
+### Gunshots
+
+The weapon callback records:
+
+- shooter identity and player session;
+- server timestamp and position;
+- weapon and ammunition type;
+- muzzle index;
+- suppressor presence and type.
+
+The Go audio model compares the shot position with the observer’s nearest authoritative position sample and assigns one of:
+
+- `CAPTURED_STRONG_CUE`;
+- `LIKELY_AUDIO_CUE`;
+- `POSSIBLE_AUDIO_CUE`;
+- `NOT_AUDIBLE_BY_MODEL`.
+
+The initial ranges are conservative policy values and are versioned. Suppressed and unsuppressed shots use different bands.
+
+### Footsteps and movement
+
+At a bounded server cadence, moving players generate `MOVEMENT_AUDIO_OPPORTUNITY` events containing:
+
+- authoritative position and velocity-derived speed;
+- a coarse gait band;
+- stance;
+- surface type from `SurfaceGetType3D`;
+- footwear attachment type.
+
+Go estimates a likely and maximum footstep range from those fields. It does not claim to reproduce DayZ’s complete sound engine, building acoustics, weather masking, animation-specific samples, or the player’s actual volume settings.
+
+### Cue safety
+
+A cue means:
+
+> The captured game state supports a plausible opportunity for the observer to hear the target.
+
+It does not mean:
+
+> The observer definitely heard and correctly localized the target.
+
+Strong or likely cues can classify an observation as known or plausible and remove it from the primary unexplained-feature set. Possible cues remain visible to reviewers but do not automatically suppress the primary analysis.
 
 ## Time model
 
@@ -212,14 +286,14 @@ Writes use a temporary file, fsync, atomic rename, and a directory sync where su
 
 ### PostgreSQL tier
 
-PostgreSQL stores normalized events, sessions, sampling opportunities, visibility evidence, observations, feature results, review rankings, cases, and review dispositions.
+PostgreSQL stores normalized events, direct identities, sessions, sampling opportunities, visibility evidence, cue facts, observations, feature results, review rankings, cases, and review dispositions.
 
-Database data is derived and can be rebuilt from retained raw batches, subject to retention and privacy deletion.
+Database data is derived and can be rebuilt from retained raw batches, except for operational information such as reviewer dispositions that exists only in PostgreSQL.
 
 ### Versioning
 
 - breaking transport changes increment `schema_version`;
-- sampling, visibility, observation, feature, matching, and ranking policies carry explicit version identifiers;
+- sampling, visibility, audio, observation, feature, matching, and ranking policies carry explicit version identifiers;
 - applied SQL migrations are checksum-verified;
 - historical raw data can be replayed with a newer analysis implementation without rewriting the original evidence.
 
@@ -231,6 +305,8 @@ The system is intended to fail conservatively:
 - queue and spool limits are bounded and reported through health events;
 - stale or dead observer/target entities are revalidated before a visibility probe;
 - malformed, unauthorized, conflicting, or impossible batches are rejected;
+- missing position context prevents an audio cue from being asserted;
+- possible audio is retained without automatically explaining an observation;
 - unavailable map data is not substituted with a different terrain;
 - missing telemetry or failed negative controls suppresses higher review tiers;
 - no failure mode creates automatic gameplay enforcement.
@@ -241,6 +317,8 @@ The system is intended to fail conservatively:
 cmd/                    runnable Go services and tools
 dayz/BehaviourProbe/    DayZ client/server mod source
 deploy/                 Docker Compose deployment
+internal/audio/         audibility policy model
+internal/cues/          cue-ledger enrichment
 internal/               ingestion, replay, normalization, features, review UI
 pkg/schema/             transport schema and validation
 docs/                   newcomer and operator guides
