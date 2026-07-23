@@ -1,0 +1,52 @@
+name: Final audio and identity validation
+
+on:
+  push:
+    branches: [feature/audio-cues-direct-identities]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/audio-cues-direct-identities
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l ./cmd ./internal ./pkg)"
+      - name: Run tests
+        run: go test ./...
+      - name: Run race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build commands
+        run: go build ./cmd/...
+      - name: Validate Compose
+        env:
+          DBA_POSTGRES_PASSWORD: test-postgres-password
+          DBA_QUERY_TOKEN: test-ingest-token
+          DBA_REVIEW_TOKEN: test-review-token
+          DBA_STEAM_ADMIN_IDS: "76561198000000000"
+          DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
+        run: docker compose -f deploy/compose.yaml config --quiet
+      - name: Verify direct identity and audio invariants
+        run: |
+          grep -q 'DirectPolicyVersion = "direct-identifiers-v1"' internal/identity/pseudonym.go
+          grep -q 'audio_context_interval_seconds = 2.0' dayz/BehaviourProbe/scripts/3_Game/DayZBehaviour/ZZZZZZZ_DBAAudioTypes.c
+          grep -q 'override void EEFired(int muzzleType, int mode, string ammoType)' dayz/BehaviourProbe/scripts/4_World/DayZBehaviour/ZZZZZZZ_DBAAudioWeapon.c
+          grep -q 'SurfaceGetType3D(position\[0\], position\[1\], position\[2\], surfaceType)' dayz/BehaviourProbe/scripts/5_Mission/DayZBehaviour/ZZZZZZZ_DBAAudioMission.c
+          grep -q 'if sample.timeMS > atMS' internal/cues/audio.go
+      - name: Remove one-time workflow
+        run: |
+          git rm .github/workflows/final-audio-validation.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "ci: remove final validation workflow"
+          git push origin HEAD:feature/audio-cues-direct-identities
