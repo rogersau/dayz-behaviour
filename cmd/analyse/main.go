@@ -44,14 +44,14 @@ type candidate struct {
 }
 
 type dataQuality struct {
-	StrongHiddenObservationCount    int      `json:"strong_hidden_observation_count"`
-	NeutralControlObservationCount  int      `json:"neutral_control_observation_count"`
-	VisiblePositiveControlCount     int      `json:"visible_positive_control_observation_count"`
-	DroppedRandomOpportunityCount   int      `json:"dropped_random_opportunity_count"`
-	AudioExplanatoryObservationCount int     `json:"audio_explanatory_observation_count"`
-	GunshotCueCount                 int      `json:"gunshot_cue_count"`
-	FootstepCueCount                int      `json:"footstep_cue_count"`
-	Limitations                     []string `json:"limitations"`
+	StrongHiddenObservationCount     int      `json:"strong_hidden_observation_count"`
+	NeutralControlObservationCount   int      `json:"neutral_control_observation_count"`
+	VisiblePositiveControlCount      int      `json:"visible_positive_control_observation_count"`
+	DroppedRandomOpportunityCount    int      `json:"dropped_random_opportunity_count"`
+	AudioExplanatoryObservationCount int      `json:"audio_explanatory_observation_count"`
+	GunshotCueCount                  int      `json:"gunshot_cue_count"`
+	FootstepCueCount                 int      `json:"footstep_cue_count"`
+	Limitations                      []string `json:"limitations"`
 }
 
 func main() {
@@ -104,8 +104,8 @@ func main() {
 		if observation.PositiveControlEligible {
 			result.DataQuality.VisiblePositiveControlCount++
 		}
-		if observation.CueClass == "KNOWN" || observation.CueClass == "PLAUSIBLE" {
-			result.DataQuality.AudioExplanatoryObservationCount += countAudioFacts(observation.CueFacts) > 0
+		if (observation.CueClass == "KNOWN" || observation.CueClass == "PLAUSIBLE") && countAudioFacts(observation.CueFacts) > 0 {
+			result.DataQuality.AudioExplanatoryObservationCount++
 		}
 		for _, fact := range observation.CueFacts {
 			switch fact.CueType {
@@ -149,7 +149,7 @@ func main() {
 			PreExposure:      preExposure,
 			ReviewPriority:   decision,
 		})
-		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerPseudonym: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: decision})
+		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerID: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: decision})
 	}
 	if *databaseURL != "" {
 		ctx := context.Background()
