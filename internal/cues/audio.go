@@ -15,8 +15,8 @@ import (
 const LedgerVersion = "audio-cue-ledger-v1"
 
 type Config struct {
-	GunshotLookbackMS int64
-	FootstepLookbackMS int64
+	GunshotLookbackMS   int64
+	FootstepLookbackMS  int64
 	SnapshotToleranceMS int64
 }
 
@@ -174,7 +174,7 @@ func gunshotCue(source event, observation *observations.Observation, snapshots m
 		"ledger_version": LedgerVersion, "audio_model_version": result.ModelVersion,
 		"audibility": result.Audibility, "distance_metres": round1(distance),
 		"direction_degrees": round1(directionDegrees(observerPosition, sourcePosition)),
-		"weapon_type": source.data.WeaponType, "ammo": source.data.Ammo,
+		"weapon_type":       source.data.WeaponType, "ammo": source.data.Ammo,
 		"suppressed": source.data.IsSuppressed, "suppressor_type": source.data.SuppressorType,
 		"likely_range_metres": result.LikelyRangeM, "maximum_range_metres": result.MaximumRangeM,
 	})
@@ -205,9 +205,9 @@ func footstepCue(source event, observation *observations.Observation, snapshots 
 	details := cueDetails(map[string]any{
 		"ledger_version": LedgerVersion, "audio_model_version": result.ModelVersion,
 		"audibility": result.Audibility, "distance_metres": round1(distance),
-		"direction_degrees": round1(directionDegrees(observerPosition, sourcePosition)),
+		"direction_degrees":       round1(directionDegrees(observerPosition, sourcePosition)),
 		"speed_metres_per_second": round1(source.data.MovementSpeed),
-		"gait": source.data.MovementState, "stance": source.data.Stance,
+		"gait":                    source.data.MovementState, "stance": source.data.Stance,
 		"surface_type": source.data.SurfaceType, "footwear_type": source.data.FootwearType,
 		"likely_range_metres": round1(result.LikelyRangeM), "maximum_range_metres": round1(result.MaximumRangeM),
 		"estimated_not_raw_audio": true,

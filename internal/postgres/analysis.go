@@ -12,15 +12,15 @@ import (
 )
 
 type AnalysisCandidate struct {
-	PlayerID        string
-	PlayerSessions  []string
-	Readiness       features.ReadinessResult
-	Matched         features.ConditionalLogitResult
-	Stability       features.StabilityResult
-	Controls        features.NegativeControlResult
-	Sector          features.SectorResult
-	PreExposure     features.PreExposureResult
-	Decision        ranking.Decision
+	PlayerID       string
+	PlayerSessions []string
+	Readiness      features.ReadinessResult
+	Matched        features.ConditionalLogitResult
+	Stability      features.StabilityResult
+	Controls       features.NegativeControlResult
+	Sector         features.SectorResult
+	PreExposure    features.PreExposureResult
+	Decision       ranking.Decision
 }
 
 func (s *Store) PersistAnalysis(ctx context.Context, built []observations.Observation, strata []features.MatchedStratum, candidates []AnalysisCandidate) (string, error) {
