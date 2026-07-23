@@ -11,7 +11,6 @@ import (
 
 	"github.com/rogersau/dayz-behaviour/internal/cues"
 	"github.com/rogersau/dayz-behaviour/internal/features"
-	"github.com/rogersau/dayz-behaviour/internal/identity"
 	"github.com/rogersau/dayz-behaviour/internal/observations"
 	"github.com/rogersau/dayz-behaviour/internal/postgres"
 	"github.com/rogersau/dayz-behaviour/internal/ranking"
@@ -24,7 +23,6 @@ type output struct {
 	AudioCueLedgerVersion     string      `json:"audio_cue_ledger_version"`
 	FeatureAlgorithmVersion   string      `json:"feature_algorithm_version"`
 	RankingPolicyVersion      string      `json:"ranking_policy_version"`
-	IdentityPolicyVersion     string      `json:"identity_policy_version"`
 	ObservationCount          int         `json:"observation_count"`
 	Candidates                []candidate `json:"candidates"`
 	DataQuality               dataQuality `json:"data_quality"`
@@ -59,13 +57,8 @@ func main() {
 	databaseURL := flag.String("database-url", os.Getenv("DBA_DATABASE_URL"), "optional PostgreSQL URL for durable analysis output")
 	flag.Parse()
 
-	identityPolicy, err := identity.CurrentPolicy()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	var batches []schema.Batch
-	_, err = replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
+	_, err := replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
 		batches = append(batches, batch)
 		return nil
 	}))
@@ -86,7 +79,6 @@ func main() {
 		AudioCueLedgerVersion:     cues.LedgerVersion,
 		FeatureAlgorithmVersion:   features.ReadinessAlgorithmVersion,
 		RankingPolicyVersion:      ranking.PolicyVersion,
-		IdentityPolicyVersion:     identityPolicy.Version,
 		ObservationCount:          len(built),
 	}
 	for _, observation := range built {
