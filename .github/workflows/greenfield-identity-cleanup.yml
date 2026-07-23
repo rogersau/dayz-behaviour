@@ -1,0 +1,186 @@
+name: Apply greenfield identity cleanup
+
+on:
+  push:
+    branches: [feature/audio-cues-direct-identities]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/audio-cues-direct-identities
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Remove migration and compatibility seams
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import shutil
+
+          def replace(path_name, old, new, required=True):
+              path = Path(path_name)
+              source = path.read_text()
+              if required and old not in source:
+                  raise SystemExit(f"expected text not found in {path_name}: {old[:80]!r}")
+              path.write_text(source.replace(old, new))
+
+          def remove_heading_section(path_name, heading, next_heading):
+              path = Path(path_name)
+              source = path.read_text()
+              pattern = re.compile(rf"\n{re.escape(heading)}\n.*?(?=\n{re.escape(next_heading)}\n)", re.S)
+              updated, count = pattern.subn("\n", source)
+              if count != 1:
+                  raise SystemExit(f"expected one section {heading!r} in {path_name}, got {count}")
+              path.write_text(updated)
+
+          for name in [
+              "cmd/direct-identity-rebuild",
+              "internal/postgres/direct_identity.go",
+              "internal/postgres/migrations/006_direct_identity_policy.sql",
+              "internal/review/direct_identity.go",
+              "internal/identity",
+          ]:
+              path = Path(name)
+              if path.is_dir():
+                  shutil.rmtree(path)
+              elif path.exists():
+                  path.unlink()
+
+          analyse = Path("cmd/analyse/main.go")
+          source = analyse.read_text()
+          source = source.replace('\t"github.com/rogersau/dayz-behaviour/internal/identity"\n', '')
+          source = source.replace('\tIdentityPolicyVersion     string      `json:"identity_policy_version"`\n', '')
+          source = source.replace('''\n\tidentityPolicy, err := identity.CurrentPolicy()\n\tif err != nil {\n\t\tlog.Fatal(err)\n\t}\n''', '\n')
+          source = source.replace('\t_, err = replay.Run(', '\t_, err := replay.Run(')
+          source = source.replace('\t\tIdentityPolicyVersion:     identityPolicy.Version,\n', '')
+          analyse.write_text(source)
+
+          store = Path("internal/postgres/store.go")
+          source = store.read_text()
+          source = source.replace('\t"github.com/rogersau/dayz-behaviour/internal/identity"\n', '')
+          source = source.replace('\tdirectPlayerID := pseudonymousDurableID(durablePlayerID)\n', '')
+          source = source.replace('directPlayerID', 'durablePlayerID')
+          source = source.replace('subject_pseudonym', 'subject_player_id')
+          source = source.replace('\treturn s.ensurePseudonymPolicy(ctx)\n', '\treturn nil\n')
+          source, count = re.subn(r'\nfunc \(s \*Store\) ensurePseudonymPolicy\(ctx context\.Context\) error \{.*?\n\}\n\n(?=func \(s \*Store\) Accept)', '\n', source, flags=re.S)
+          if count != 1:
+              raise SystemExit(f"expected one ensurePseudonymPolicy function, got {count}")
+          source = source.replace('\t\tplayerSessionID := pseudonymousSessionID(event.PlayerSessionID)\n', '\t\tplayerSessionID := event.PlayerSessionID\n')
+          source = source.replace('pseudonymousDurableID(rawDurableID(event.PlayerSessionID))', 'rawDurableID(event.PlayerSessionID)')
+          identity_loops = '''\tfor _, key := range []string{"observer_player_session_id", "target_player_session_id"} {\n\t\tif value := stringField(fields, key); value != "" {\n\t\t\tfields[key] = pseudonymousSessionID(value)\n\t\t}\n\t}\n\tfor _, key := range []string{"observer_player_id", "target_player_id", "source_player_id", "player_id"} {\n\t\tif value := stringField(fields, key); value != "" {\n\t\t\tfields[key] = pseudonymousDurableID(value)\n\t\t}\n\t}\n'''
+          if identity_loops not in source:
+              raise SystemExit("expected identity normalization loops")
+          source = source.replace(identity_loops, '')
+          source, count = re.subn(r'\nfunc pseudonymousSessionID\(raw string\) string \{.*?\n\}\n\nfunc pseudonymousDurableID\(raw string\) string \{.*?\n\}\n', '\n', source, flags=re.S)
+          if count != 1:
+              raise SystemExit(f"expected identity helper pair, got {count}")
+          source = source.replace('''func digest(value string) string {\n\treturn identity.MustDigest(value)\n}\n''', '''func digest(value string) string {\n\tsum := sha256.Sum256([]byte(value))\n\treturn hex.EncodeToString(sum[:])\n}\n''')
+          source = source.replace('target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`}', 'target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`}')
+          store.write_text(source)
+
+          analysis = Path("internal/postgres/analysis.go")
+          source = analysis.read_text()
+          source = source.replace('pseudonymousSessionID(observation.ObserverPlayerSessionID)', 'observation.ObserverPlayerSessionID')
+          source = source.replace('pseudonymousSessionID(observation.TargetPlayerSessionID)', 'observation.TargetPlayerSessionID')
+          analysis.write_text(source)
+
+          api = Path("internal/review/api.go")
+          source = api.read_text().replace('PlayerPseudonym', 'PlayerID').replace('json:"player_pseudonym"', 'json:"player_id"')
+          api.write_text(source)
+
+          review_db = Path("internal/review/postgres.go")
+          review_db.write_text(review_db.read_text().replace('PlayerPseudonym', 'PlayerID'))
+
+          identity_test = Path("internal/postgres/identity_test.go")
+          source = identity_test.read_text()
+          source, count = re.subn(r'\nfunc TestDirectIdentityHelpersArePassThrough\(t \*testing\.T\) \{.*?\n\}\n', '\n', source, flags=re.S)
+          if count != 1:
+              raise SystemExit(f"expected helper test, got {count}")
+          identity_test.write_text(source)
+
+          migration4 = Path("internal/postgres/migrations/004_operations.sql")
+          migration4.write_text(migration4.read_text().replace('subject_pseudonym', 'subject_player_id'))
+          migration5 = Path("internal/postgres/migrations/005_identity_and_migration_integrity.sql")
+          if migration5.exists():
+              migration5.unlink()
+          Path("internal/postgres/migrations/005_migration_integrity.sql").write_text("""ALTER TABLE schema_migrations\n    ADD COLUMN IF NOT EXISTS checksum_sha256 text NOT NULL DEFAULT '';\n""")
+
+          ci = Path(".github/workflows/ci.yml")
+          source = ci.read_text()
+          source = source.replace('''      - name: Compile direct identity rebuild command\n        run: go test ./cmd/direct-identity-rebuild\n''', '')
+          ci.write_text(source)
+
+          readme = Path("README.md")
+          source = readme.read_text().replace('| `cmd/direct-identity-rebuild` | Rebuilds previously anonymized derived data from retained raw batches using direct identities |\n', '')
+          readme.write_text(source)
+          remove_heading_section("README.md", "## Migrating an existing anonymized database", "## Operations and privacy")
+          remove_heading_section("docs/architecture.md", "### Upgrading from pseudonymized data", "## Audio-cue model")
+          replace("docs/architecture.md", "Access control and retention are therefore the privacy boundary; pseudonymization is no longer used.", "Because identities are direct, access control and retention are the privacy boundary.")
+          replace("docs/architecture.md", "- muzzle index;", "- muzzle type and fire mode;")
+          remove_heading_section("docs/deployment.md", "## Existing databases created by an anonymizing release", "## Verify the services")
+          remove_heading_section("docs/operations.md", "### Existing pseudonymized databases", "## Audio-model operations")
+          replace("docs/operations.md", "## Direct identity policy", "## Direct identities")
+          replace("docs/analysis-and-review.md", "\nThe API exposes `player_id`. A legacy `player_pseudonym` field may remain temporarily for client compatibility but contains the same direct identity.\n", "\nThe API exposes the direct identity as `player_id`.\n")
+
+          for path in Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts or path.suffix in {'.sum'}:
+                  continue
+              try:
+                  text = path.read_text()
+              except UnicodeDecodeError:
+                  continue
+              text = text.replace('PlayerPseudonym', 'PlayerID')
+              text = text.replace('player_pseudonym', 'player_id')
+              path.write_text(text)
+
+          forbidden = [
+              'direct-identity-rebuild', 'pseudonym_policy_state', 'CurrentPolicy',
+              'DirectPolicyVersion', 'PlayerPseudonym', 'player_pseudonym',
+              'pseudonymousSessionID', 'pseudonymousDurableID',
+          ]
+          violations = []
+          for path in Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              try:
+                  text = path.read_text()
+              except UnicodeDecodeError:
+                  continue
+              for token in forbidden:
+                  if token in text:
+                      violations.append(f"{path}: {token}")
+          if violations:
+              raise SystemExit('greenfield cleanup left compatibility seams:\n' + '\n'.join(violations))
+          PY
+          gofmt -w ./cmd ./internal ./pkg
+      - name: Validate cleanup
+        env:
+          DBA_POSTGRES_PASSWORD: test-postgres-password
+          DBA_QUERY_TOKEN: test-ingest-token
+          DBA_REVIEW_TOKEN: test-review-token
+          DBA_STEAM_ADMIN_IDS: "76561198000000000"
+          DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
+        run: |
+          go test ./...
+          go test -race ./...
+          go vet ./...
+          go build ./cmd/...
+          docker compose -f deploy/compose.yaml config --quiet
+      - name: Commit cleanup
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "refactor: make direct identities greenfield-only"
+          git push origin HEAD:feature/audio-cues-direct-identities
