@@ -54,9 +54,15 @@ modded class DBAProbeRuntime
         int expectedSequence;
         int expectedServerSendMS;
         int expiryMS;
-        if (!s_ClockChallengeSequenceByPlayer.Find(playerID, expectedSequence) ||
-            !s_ClockChallengeSendMSByPlayer.Find(playerID, expectedServerSendMS) ||
-            !s_ClockChallengeExpiryMSByPlayer.Find(playerID, expiryMS))
+        if (!s_ClockChallengeSequenceByPlayer.Find(playerID, expectedSequence))
+        {
+            return false;
+        }
+        if (!s_ClockChallengeSendMSByPlayer.Find(playerID, expectedServerSendMS))
+        {
+            return false;
+        }
+        if (!s_ClockChallengeExpiryMSByPlayer.Find(playerID, expiryMS))
         {
             return false;
         }
