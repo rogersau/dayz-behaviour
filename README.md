@@ -1,69 +1,146 @@
 # DayZ Behaviour
 
-Behavioural telemetry and conservative review-prioritisation tooling for repeated hidden-awareness patterns in DayZ. It supports manual review only; it does not decide cheating or trigger bans, kicks or gameplay action.
+DayZ Behaviour is a telemetry and analysis system for finding repeated **hidden-awareness behaviour** on DayZ servers. It collects bounded client and server observations, compares a player’s reactions with neutral situations, and gives administrators explainable cases to review.
 
-## Status
+It is not an automatic anti-cheat verdict system. It does not ban, kick, punish, or send any gameplay action back to DayZ.
 
-The collector, durable data plane, replay/normalisation, core analysis and persistent review API are implemented. The mod packs and loads on DayZ Server 1.29.0.163451, and authenticated live export plus outage spool recovery have been exercised.
+## What problem it is trying to solve
 
-Production readiness is intentionally blocked on connected-player capability fixtures, controlled visibility validation, representative load, trusted-cohort calibration, negative controls and blinded-review yield. See [implementation status](docs/implementation-status.md) and the [capability matrix](docs/capability-matrix.md).
+Conventional anti-cheat tools are good at detecting known software, impossible inputs, or invalid game state. They are less useful when a player appears to know where concealed opponents are but leaves no direct technical signature.
 
-## Test and run locally
+This project looks for repeated behavioural patterns such as:
 
-Go may need to be addressed by its full path on Windows if it is not yet in the current shell's `PATH`.
+- raising or aiming a weapon while another player is validated as concealed;
+- turning towards concealed-player sectors more often than matched controls;
+- reacting before a target becomes visible, while preserving timing uncertainty;
+- repeating these patterns across different sessions, encounters, and target players.
+
+A single incident is not treated as proof. The system requires repeated, independent observations and presents limitations such as uncaptured audio, team communications, and ordinary player inference.
+
+## How it works
+
+```text
+DayZ client mod ─┐
+                 ├─> DayZ server collector ─> ingestd ─> immutable raw files
+DayZ server ─────┘                                  │
+                                                    ├─> normalize ─> PostgreSQL
+                                                    ├─> analyse ───> review rankings
+                                                    └─> reviewd ───> admin explorer
+```
+
+The DayZ server remains the authority for identity, lifecycle, combat, position, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
+
+Read [Architecture](docs/architecture.md) for the complete data flow and trust model.
+
+## Main components
+
+| Component | Purpose |
+|---|---|
+| `dayz/BehaviourProbe` | Client/server DayZ mod that captures bounded telemetry and visibility observations |
+| `cmd/ingestd` | Authenticated loopback receiver and DayZ spool importer |
+| `cmd/normalize` | Converts immutable raw batches into pseudonymized PostgreSQL records |
+| `cmd/analyse` | Builds observations, matched controls, feature estimates, and review tiers |
+| `cmd/reviewd` | Steam-authenticated evidence browser and review API |
+| `cmd/retention` | Dry-run-first raw, normalized, and review retention |
+| `cmd/privacy-delete` | Audited deletion of one durable player identity |
+
+## Safety model
+
+- Results are review priorities, not cheat probabilities.
+- Strong hidden-target evidence requires server-authoritative geometry and a validated first-person visibility policy.
+- Client data can suppress confidence but cannot strengthen an allegation by itself.
+- Hidden observations are compared with neutral no-relevant-target opportunities, not merely with visible opponents.
+- Evidence breadth, uncertainty, matched-model stability, and negative-control gates are required before higher review tiers are produced.
+- Pre-exposure timing is experimental supporting evidence and cannot promote a review tier.
+
+Read [Analysis and review](docs/analysis-and-review.md) for the statistical model and interpretation rules.
+
+## Quick start
+
+### Requirements
+
+- Go matching `go.mod`;
+- Docker with Compose;
+- a DayZ dedicated server and a way to pack/sign the mod for live collection;
+- PostgreSQL 17 when running services outside Compose.
+
+### Run tests
 
 ```powershell
 go test ./...
 go vet ./...
-
-$env:DBA_QUERY_TOKEN = 'replace-with-a-long-random-token'
-go run ./cmd/ingestd
 ```
 
-The receiver binds to `127.0.0.1:8080` and stores fsynced raw batches under `./data/raw` by default. Authentication is mandatory unless `DBA_ALLOW_UNAUTHENTICATED_LOCAL=true` is explicitly set for development.
+### Start the local data and review stack
 
-## Full local stack
+Copy `.env.example` to `.env`, replace every placeholder, then run:
 
 ```powershell
-$env:DBA_POSTGRES_PASSWORD = 'replace-with-a-long-random-password'
-$env:DBA_QUERY_TOKEN = 'replace-with-a-long-random-ingest-token'
-$env:DBA_REVIEW_TOKEN = 'replace-with-a-long-random-review-token'
-$env:DBA_STEAM_ADMIN_IDS = '76561198000000000' # comma-separated SteamID64 allowlist
-$env:DBA_SESSION_SECRET = 'replace-with-at-least-32-random-characters'
-$env:DBA_PUBLIC_BASE_URL = 'http://127.0.0.1:8082'
-docker compose -f deploy/compose.yaml up --build postgres ingestd reviewd
+docker compose --env-file .env -f deploy/compose.yaml up --build postgres ingestd normalize reviewd
 ```
 
-Normalize and analyse immutable raw data:
+The services bind to loopback by default:
+
+- ingest receiver: `http://127.0.0.1:8080`;
+- admin explorer: `http://127.0.0.1:8082`;
+- PostgreSQL: `127.0.0.1:5432`.
+
+Do not expose the DayZ query-token ingest endpoint or PostgreSQL directly to a network.
+
+### Configure the DayZ mod
+
+Pack `dayz/BehaviourProbe`, load it on both the client and dedicated server, and start the server once. The mod creates:
+
+```text
+$profile:DayZBehaviourProbe/config.json
+```
+
+Set at least:
+
+```json
+{
+  "server_id": "your-server-name",
+  "endpoint": "http://127.0.0.1:8080/",
+  "ingest_token": "the-same-value-as-DBA_QUERY_TOKEN"
+}
+```
+
+Visibility probing is disabled by default. Do not enable strong hidden-target evidence until the server is first-person-only and its visibility policy has passed a controlled validation fixture.
+
+See [Deployment](docs/deployment.md) for the full setup, environment variables, network topology, and first-run checklist.
+
+## Running analysis manually
 
 ```powershell
 go run ./cmd/normalize -raw-dir ./data/raw
 go run ./cmd/analyse -raw-dir ./data/raw
 ```
 
-The admin explorer is served at `http://127.0.0.1:8082/`. Browser users sign in through Steam and are admitted only when their verified SteamID64 is in `DBA_STEAM_ADMIN_IDS`. The UI provides searchable pseudonymized sessions, a filterable context timeline and a self-contained route/location map. The review image includes only level-4 Chernarus, Livonia, Sakhal and Namalsk assets selected from DZMap; no second map container runs. Compose continuously normalizes new immutable batches, and its `telemetry-data` and `postgres-data` volumes survive ordinary container restarts and `docker compose down`. Do not use `docker compose down -v` unless the captured dataset is intentionally being erased. API clients can continue to use `Authorization: Bearer <DBA_REVIEW_TOKEN>`.
+When `DBA_DATABASE_URL` is configured, both normalized data and analysis results are persisted to PostgreSQL. Without it, `analyse` prints JSON to standard output.
 
-For a reverse-proxied deployment, set `DBA_PUBLIC_BASE_URL` to the exact externally visible HTTPS origin. Steam OpenID callback URLs and secure-cookie behaviour are derived from it. See [admin explorer operations](docs/admin-explorer.md).
+## Operations and privacy
 
-Retention and identity deletion default to report-only operation:
+Retention and player deletion are report-only unless `-execute` is supplied:
 
 ```powershell
 go run ./cmd/retention -raw-dir ./data/raw
 go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-id>'
 ```
 
-Add `-execute` only after reviewing the reported scope. Executed identity deletion also requires `-actor`, `-reason` and PostgreSQL configuration and writes a pseudonymous audit record.
+Production deployments must configure a stable pseudonym secret and key ID before the database is first populated. Changing them later requires an explicit identity migration.
 
-## DayZ mod
+See [Operations, security, and privacy](docs/operations.md) for backups, spool recovery, retention, deletion, administrator access, key management, and troubleshooting.
 
-Source is under `dayz/BehaviourProbe`. Pack and load it on both client and dedicated server. First launch creates `$profile:DayZBehaviourProbe/config.json`; configure the loopback endpoint and the same ingest token.
+## Documentation
 
-Visibility probes are disabled by default. Keep `visibility_origin_mode` as `PLAYER_HEAD_APPROXIMATION`, `server_first_person_only` as `false`, and the validation ID empty during development. Strong occlusion may only be enabled after a controlled first-person confusion matrix passes on a server that actually enforces first person; then set `server_first_person_only` to `true`, use `VALIDATED_FIRST_PERSON_HEAD`, and record the issued validation ID. Third-person or unknown-perspective head rays never become strong evidence.
+- [Documentation index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Analysis and review](docs/analysis-and-review.md)
+- [Deployment](docs/deployment.md)
+- [Operations, security, and privacy](docs/operations.md)
 
-## Design references
+## Current maturity
 
-- [Implementation plan](docs/behavioural-awareness-implementation-plan.md)
-- [Specification](docs/behavioural-awareness-spec.md)
-- [Implementation inventory](docs/implementation-inventory.md)
-- [Sampling and latency report](docs/sampling-and-latency-report.md)
-- [DayZ script surface register](docs/dayz-script-surface-register.md)
+The collector, authenticated ingest path, immutable raw storage, normalization, analysis, persistent review data, Steam-authenticated explorer, maps, spool recovery, retention, and deletion workflows are implemented.
+
+The project should still be treated as an evaluation system until each deployment has completed its own multiplayer visibility validation, representative-load testing, calibration on trusted cohorts, negative-control checks, and review-yield assessment.
