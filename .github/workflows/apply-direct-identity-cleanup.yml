@@ -24,15 +24,9 @@ jobs:
           path = Path('internal/postgres/store.go')
           source = path.read_text()
           source = source.replace(
-              '// when they no longer reference a subject. The audit record contains a one-way\n// pseudonym, never the supplied durable identity.',
-              '// when they no longer reference a subject. The audit record retains the direct\n// durable identity so deletion actions can be cross-referenced operationally.',
-          )
-          source = source.replace('durablePseudonym', 'directPlayerID')
-          source = source.replace(
               '`DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`',
-              '`DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions)`',
+              '`DELETE FROM observer_target_episodes WHERE observer_player_session_id IN (SELECT player_session_id FROM deletion_sessions) OR target_player_session_id IN (SELECT player_session_id FROM deletion_sessions))`',
           )
-          source = source.replace("'v2-keyed-identities'", "'v3-direct-identities'")
           path.write_text(source)
           PY
           gofmt -w internal/postgres/store.go
@@ -44,5 +38,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add internal/postgres/store.go
-          git commit -m "fix: align deletion and storage with direct identities"
+          git commit -m "fix: repair direct identity deletion SQL"
           git push origin HEAD:feature/audio-cues-direct-identities
