@@ -4,6 +4,8 @@ DayZ Behaviour is a telemetry and analysis system for finding repeated **hidden-
 
 It is not an automatic anti-cheat verdict system. It does not ban, kick, punish, or send any gameplay action back to DayZ.
 
+![How DayZ Behaviour works](docs/images/how-dayz-behaviour-works.svg)
+
 ## What problem it is trying to solve
 
 Conventional anti-cheat tools are good at detecting known software, impossible inputs, or invalid game state. They are less useful when a player appears to know where concealed opponents are but leaves no direct technical signature.
@@ -17,16 +19,11 @@ This project looks for repeated behavioural patterns such as:
 
 A single incident is not treated as proof. The system requires repeated, independent observations and preserves legitimate explanations such as prior visual contact, gunshots, inferred footsteps, team communications, map knowledge, prediction, and information the collector did not capture.
 
+![What the system looks at](docs/images/what-the-system-looks-at.svg)
+
 ## How it works
 
-```text
-DayZ client mod ─┐
-                 ├─> DayZ server collector ─> ingestd ─> immutable raw files
-DayZ server ─────┘                                  │
-                                                    ├─> normalize ─> PostgreSQL
-                                                    ├─> analyse ───> review rankings
-                                                    └─> reviewd ───> admin explorer
-```
+![System architecture](docs/images/system-architecture.svg)
 
 The DayZ server remains the authority for identity, lifecycle, combat, position, movement-audio opportunities, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
 
@@ -57,7 +54,15 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 - Evidence breadth, uncertainty, matched-model stability, and negative-control gates are required before higher review tiers are produced.
 - Pre-exposure timing is experimental supporting evidence and cannot promote a review tier.
 
-Read [Analysis and review](docs/analysis-and-review.md) for the statistical model and interpretation rules.
+![How a case gets flagged](docs/images/how-a-case-gets-flagged.svg)
+
+### How the review tier is calculated
+
+The system does not produce a single opaque cheat score. It builds a review tier from transparent evidence measurements and validation gates.
+
+![How scoring works](docs/images/how-scoring-works.svg)
+
+Read [Analysis and review](docs/analysis-and-review.md) for the statistical model, thresholds, and interpretation rules.
 
 ## Quick start
 
