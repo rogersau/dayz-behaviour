@@ -13,7 +13,7 @@ modded class DBAProbeRuntime
         s_EdgeCountByPlayer.Remove(playerID);
         s_BatchWindowStartByPlayer.Remove(playerID);
         s_BatchCountByPlayer.Remove(playerID);
-        ResetClockChallenge(playerID);
+        ResetClockAlignment(playerID);
 
         for (int batchIndex = s_ReceivedClientBatches.Count() - 1; batchIndex >= 0; batchIndex--)
         {

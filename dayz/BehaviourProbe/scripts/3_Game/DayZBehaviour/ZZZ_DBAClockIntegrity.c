@@ -26,6 +26,17 @@ modded class DBAProbeRuntime
         s_ClockChallengeExpiryMSByPlayer.Remove(playerID);
     }
 
+    static void ResetClockAlignment(string playerID)
+    {
+        ResetClockChallenge(playerID);
+        if (playerID == "")
+        {
+            return;
+        }
+        s_LatestClockOffsetByPlayer.Remove(playerID);
+        s_LatestClockUncertaintyByPlayer.Remove(playerID);
+    }
+
     static bool ReceiveValidatedClockResponse(PlayerIdentity sender, ParamsReadContext ctx)
     {
         if (!sender)
@@ -89,6 +100,8 @@ modded class DBAProbeRuntime
         sample.round_trip_ms = roundTripMS;
         sample.offset_estimate_ms = ((expectedServerSendMS - clientReceiveMS) + (serverReceiveMS - clientSendMS)) * 0.5;
         sample.uncertainty_ms = roundTripMS * 0.5;
+        s_LatestClockOffsetByPlayer.Set(playerID, sample.offset_estimate_ms);
+        s_LatestClockUncertaintyByPlayer.Set(playerID, sample.uncertainty_ms);
         if (s_ClockSamples.Count() >= DBAProbeConstants.MAX_QUEUED_CLOCK_SAMPLES)
         {
             s_ClockSamples.RemoveOrdered(0);
