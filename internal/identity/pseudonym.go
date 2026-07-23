@@ -57,3 +57,17 @@ func MustDigest(value string) string {
 	}
 	return result
 }
+
+func DurableID(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return "dp_" + MustDigest(raw)
+}
+
+func SessionID(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return "ps_" + MustDigest(raw)
+}
