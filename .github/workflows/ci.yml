@@ -42,7 +42,18 @@ jobs:
       - name: Test schema packages
         run: go test ./pkg/...
       - name: Test internal packages
-        run: go test ./internal/...
+        id: internal-tests
+        continue-on-error: true
+        run: go test ./internal/... > internal-tests.log 2>&1
+      - name: Upload internal test failure log
+        if: steps.internal-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-tests-log
+          path: internal-tests.log
+      - name: Fail after internal test log upload
+        if: steps.internal-tests.outcome == 'failure'
+        run: exit 1
       - name: Compile analyse command
         run: go test ./cmd/analyse
       - name: Compile direct identity rebuild command
