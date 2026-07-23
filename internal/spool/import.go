@@ -27,6 +27,10 @@ type Stats struct {
 	Duplicates int
 }
 
+// ImportDir atomically claims stable DayZ NDJSON spool files, imports every
+// batch into durable raw storage, then moves the source into an archive
+// directory. A claimed file is restored to its original name when any line
+// cannot be decoded, validated or stored.
 func ImportDir(ctx context.Context, dir string, store BatchStore, minimumAge time.Duration) (Stats, error) {
 	var stats Stats
 	if strings.TrimSpace(dir) == "" {
@@ -97,6 +101,7 @@ func importFile(ctx context.Context, path string, store BatchStore) (Stats, erro
 		return stats, err
 	}
 	defer file.Close()
+
 	reader := bufio.NewReaderSize(file, 256*1024)
 	lineNumber := 0
 	for {

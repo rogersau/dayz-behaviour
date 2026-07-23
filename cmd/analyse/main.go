@@ -42,11 +42,11 @@ type candidate struct {
 }
 
 type dataQuality struct {
-	StrongHiddenObservationCount    int      `json:"strong_hidden_observation_count"`
-	NeutralControlObservationCount  int      `json:"neutral_control_observation_count"`
-	VisiblePositiveControlCount     int      `json:"visible_positive_control_observation_count"`
-	DroppedRandomOpportunityCount   int      `json:"dropped_random_opportunity_count"`
-	Limitations                     []string `json:"limitations"`
+	StrongHiddenObservationCount   int      `json:"strong_hidden_observation_count"`
+	NeutralControlObservationCount int      `json:"neutral_control_observation_count"`
+	VisiblePositiveControlCount    int      `json:"visible_positive_control_observation_count"`
+	DroppedRandomOpportunityCount  int      `json:"dropped_random_opportunity_count"`
+	Limitations                    []string `json:"limitations"`
 }
 
 func main() {
