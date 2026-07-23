@@ -1,0 +1,61 @@
+name: Apply direct identity store fix
+
+on:
+  push:
+    branches: [feature/audio-cues-direct-identities]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/audio-cues-direct-identities
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Replace legacy identity helpers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('internal/postgres/store.go')
+          source = path.read_text()
+          old = '''func pseudonymousSessionID(raw string) string {
+          \tif raw == "" {
+          \t\treturn ""
+          \t}
+          \treturn "ps_" + digest(raw)
+          }
+
+          func pseudonymousDurableID(raw string) string {
+          \tif raw == "" {
+          \t\treturn ""
+          \t}
+          \treturn "dp_" + digest(raw)
+          }
+          '''
+          new = '''func pseudonymousSessionID(raw string) string {
+          \treturn identity.SessionID(raw)
+          }
+
+          func pseudonymousDurableID(raw string) string {
+          \treturn identity.DurableID(raw)
+          }
+          '''
+          if old in source:
+              path.write_text(source.replace(old, new))
+          PY
+          gofmt -w internal/postgres/store.go
+      - name: Commit correction
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add internal/postgres/store.go
+          git commit -m "fix: preserve direct identities in PostgreSQL"
+          git push origin HEAD:feature/audio-cues-direct-identities
