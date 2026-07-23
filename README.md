@@ -111,21 +111,26 @@ See [Deployment](docs/deployment.md) for the full setup, environment variables, 
 
 ## Running analysis manually
 
+`normalize` requires `DBA_DATABASE_URL`. `analyse` persists results when it is configured and otherwise prints JSON to standard output.
+
 ```powershell
+$env:DBA_DATABASE_URL = 'postgres://user:password@127.0.0.1:5432/dayz_behaviour?sslmode=disable'
 go run ./cmd/normalize -raw-dir ./data/raw
 go run ./cmd/analyse -raw-dir ./data/raw
 ```
 
-When `DBA_DATABASE_URL` is configured, both normalized data and analysis results are persisted to PostgreSQL. Without it, `analyse` prints JSON to standard output.
+Use the same `DBA_PSEUDONYM_SECRET` and `DBA_PSEUDONYM_KEY_ID` for normalization, analysis, and review.
 
 ## Operations and privacy
 
-Retention and player deletion are report-only unless `-execute` is supplied:
+Retention requires PostgreSQL configuration. Privacy deletion can report matching raw events without a database, but execution requires PostgreSQL, an actor, and a reason.
 
 ```powershell
 go run ./cmd/retention -raw-dir ./data/raw
 go run ./cmd/privacy-delete -raw-dir ./data/raw -player-id '<durable-id>'
 ```
+
+Both tools are report-only unless `-execute` is supplied.
 
 Production deployments must configure a stable pseudonym secret and key ID before the database is first populated. Changing them later requires an explicit identity migration.
 
