@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l ./cmd ./internal ./pkg)"
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build commands
+        run: go build ./cmd/...
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        env:
+          DBA_POSTGRES_PASSWORD: test-postgres-password
+          DBA_QUERY_TOKEN: test-ingest-token
+          DBA_REVIEW_TOKEN: test-review-token
+          DBA_STEAM_ADMIN_IDS: "76561198000000000"
+          DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
+        run: docker compose -f deploy/compose.yaml config --quiet
