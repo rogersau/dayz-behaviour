@@ -22,7 +22,8 @@ modded class Weapon_Base
         eventData.source_type = GetType();
         eventData.weapon_type = GetType();
         eventData.ammo = ammoType;
-        eventData.muzzle_index = muzzleType;
+        eventData.muzzle_type = muzzleType;
+        eventData.fire_mode = mode;
         eventData.world_position = owner.GetPosition();
 
         ItemBase suppressor = GetAttachedSuppressor();
