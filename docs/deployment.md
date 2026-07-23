@@ -173,7 +173,7 @@ Important collection controls include:
 | `max_events_per_export` | `128` | Maximum events in one HTTP batch |
 | `max_pending_events` | `512` | Bounded in-memory event queue |
 | `enable_audio_cues` | `true` | Captures server gunshot and movement-audio opportunities |
-| `audio_context_interval_seconds` | `0.5` | Server cadence for movement-audio context |
+| `audio_context_interval_seconds` | `2.0` | Server cadence for movement-audio context |
 | `audio_min_movement_speed_mps` | `0.25` | Ignores nearly stationary movement for footstep inference |
 | `enable_visibility_probe` | `false` | Enables observer/target geometry work |
 | `max_visibility_pairs_per_tick` | `1` | Per-tick visibility work cap |

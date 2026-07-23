@@ -63,7 +63,7 @@ Audio opportunity capture is enabled by default:
 ```json
 {
   "enable_audio_cues": true,
-  "audio_context_interval_seconds": 0.5,
+  "audio_context_interval_seconds": 2.0,
   "audio_min_movement_speed_mps": 0.25
 }
 ```
