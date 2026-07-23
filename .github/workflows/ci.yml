@@ -45,6 +45,8 @@ jobs:
         run: go test ./internal/...
       - name: Compile analyse command
         run: go test ./cmd/analyse
+      - name: Compile direct identity rebuild command
+        run: go test ./cmd/direct-identity-rebuild
       - name: Compile ingestd command
         id: ingestd
         continue-on-error: true
@@ -86,6 +88,4 @@ jobs:
           DBA_REVIEW_TOKEN: test-review-token
           DBA_STEAM_ADMIN_IDS: "76561198000000000"
           DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
-          DBA_PSEUDONYM_SECRET: test-pseudonym-secret-at-least-32-characters
-          DBA_PSEUDONYM_KEY_ID: test-v1
         run: docker compose -f deploy/compose.yaml config --quiet
