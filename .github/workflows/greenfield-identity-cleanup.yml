@@ -3,6 +3,7 @@ name: Apply greenfield identity cleanup
 on:
   push:
     branches: [feature/audio-cues-direct-identities]
+  workflow_dispatch:
 
 permissions:
   contents: write
