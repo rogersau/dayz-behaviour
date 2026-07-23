@@ -1,103 +1,100 @@
 # Analysis and review
 
-## What the analysis is trying to measure
+## What the analysis measures
 
-The analysis asks a narrow question:
+The analysis asks:
 
-> Does this player repeatedly enter a combat-ready state more often when another player is validated as concealed than they do during comparable neutral situations?
+> Does this player repeatedly enter a combat-ready state more often when another player is validated as concealed than during comparable neutral situations?
 
-It does not estimate the probability that a player is cheating. It produces evidence summaries and review-priority tiers so administrators can decide which sessions deserve manual inspection.
+It does not estimate the probability that a player is cheating. It produces evidence summaries and review-priority tiers for manual investigation.
 
-A plausible legitimate explanation may exist for every highlighted incident. Examples include sound, team communication, prior visual contact, map knowledge, prediction, stream sniping, or information that the collector did not capture.
+A legitimate explanation may exist for every highlighted incident, including sound, team communication, prior visual contact, map knowledge, prediction, stream sniping, or information the collector did not capture.
 
 ## From events to observations
 
-Raw telemetry is not counted directly as evidence. The observation builder creates versioned decision windows from random prospective sampling opportunities.
+Raw telemetry is not counted directly as evidence. The observation builder creates versioned decision windows from random prospective opportunities.
 
 Each observation records:
 
-- the direct observer identity and, where applicable, target session;
+- direct observer identity and target session where applicable;
 - server and server-session identity;
-- map, coarse area, movement, stance, weapon state, and population context;
-- sampling stream, inclusion probability, admission probability, and queue delay;
+- map, area, movement, stance, weapon state, and population context;
+- sampling probabilities, admission, and queue delay;
 - visibility class and authority;
-- captured cue facts before the opportunity;
-- whether a qualifying readiness transition occurred inside the decision window;
+- cue facts captured before the opportunity;
+- whether a readiness transition occurred inside the decision window;
 - lower and upper timing bounds;
-- independence, timing, hidden, neutral-control, and positive-control eligibility;
-- every source event used to construct the observation;
+- eligibility and independence flags;
+- every source event used;
 - builder and policy versions.
 
-Observations close together are grouped into refractory windows, observer/target episodes, and encounters. This prevents a burst of highly correlated samples from being treated as many independent incidents.
+Closely spaced observations are grouped into refractory windows, observer/target episodes, and encounters so correlated samples are not treated as independent evidence.
 
 ## Conditions and controls
 
 ### Hidden condition
 
-A primary hidden observation requires `ROBUSTLY_OCCLUDED` visibility. This classification is accepted only when the deployment has a validated, server-enforced first-person policy and the probe meets its duration and timing requirements.
+A primary hidden observation requires `ROBUSTLY_OCCLUDED` visibility from a validated, server-enforced first-person policy with acceptable duration and timing.
 
 ### Neutral control
 
-The primary control is a random opportunity where there is **no relevant target inside the configured risk-set radius**.
+The primary control is a random opportunity where no relevant target exists inside the configured risk-set radius.
 
 This measures the observer’s ordinary tendency to raise or aim a weapon in similar server, map, movement, stance, population, camera-policy, and sampling contexts.
 
 ### Visible positive control
 
-Exposed or partially exposed players are retained as a positive control. They help confirm that the collector captures normal legitimate reactions, but they are not the neutral baseline for hidden-awareness lift.
+Exposed and partially exposed targets are retained as a positive control to confirm that normal legitimate responsiveness is captured. They are not the neutral baseline.
 
 ## Readiness outcome
 
-The primary outcome is a client transition such as:
+The primary client transitions are:
 
 - weapon raised;
 - ADS entered;
 - optics entered.
 
-The client samples state at intervals. The event therefore has a lower and upper time bound. An outcome is eligible only when the event interval overlaps the versioned decision window and its uncertainty is within policy limits.
+Because client state is sampled, each transition has lower and upper time bounds. It is eligible only when its interval overlaps the decision window and uncertainty remains within policy limits.
 
-The transition remains Tier B client context even after clock alignment. The hidden or neutral condition is derived from Tier A server context.
+The transition remains Tier B client context. The hidden or neutral condition is Tier A server context.
 
 ## Cue ledger
 
-Before calling an opportunity unexplained, analysis searches captured prior events for plausible cues.
-
-The cue ledger includes:
+Before calling an opportunity unexplained, analysis searches prior captured events for plausible explanations:
 
 - recent exposed or partially exposed visibility;
 - recent combat contact attributed to the target;
-- server-derived gunshot audibility opportunities;
-- server-derived movement and footstep audibility opportunities;
-- other captured context added by a future cue-policy version.
+- server-derived gunshot opportunities;
+- server-derived movement and footstep opportunities.
 
-The resulting cue classes are:
+Cue classes are:
 
-- `KNOWN` — captured data contains a direct and strong explanation;
+- `KNOWN` — captured data contains a direct strong explanation;
 - `PLAUSIBLE` — captured data contains a reasonable indirect explanation;
-- `UNEXPLAINED_IN_CAPTURED_DATA` — the collector did not record a qualifying explanation.
+- `UNEXPLAINED_IN_CAPTURED_DATA` — no qualifying explanation was captured.
 
-“Unexplained” does not mean impossible or illegitimate. It means only that the retained telemetry did not capture the explanation.
+“Unexplained” does not mean impossible or illegitimate. It describes only the retained telemetry.
 
-Primary readiness features use independent observations in the unexplained class. Known and plausible observations remain available in the timeline for review.
+Primary readiness features use independent observations in the unexplained class. Known and plausible incidents remain available for review.
 
 ## Audio cues without raw audio
 
-The system records no microphone input and no raw game audio. It derives an **audibility opportunity** from game state.
+No microphone or raw game audio is recorded.
 
-### Gunshot cues
+### Gunshots
 
 For a server-recorded shot, analysis uses:
 
-- shooter and observer positions;
+- shooter and observer positions at the time of the shot;
 - distance and bearing;
-- shot time;
 - weapon and ammunition type;
+- muzzle type and fire mode;
 - suppressor state and type;
-- the versioned gunshot range model.
+- a versioned gunshot range model.
 
-The initial model applies separate conservative range bands for suppressed and unsuppressed shots.
+Suppressed and unsuppressed shots use separate conservative bands.
 
-### Footstep cues
+### Footsteps
 
 For a moving target, analysis uses:
 
@@ -107,26 +104,24 @@ For a moving target, analysis uses:
 - terrain or surface type;
 - footwear attachment type;
 - observer distance and bearing;
-- the versioned footstep range model.
+- a versioned footstep model.
 
-This is less certain than a gunshot because the server-side model does not reproduce the full DayZ audio engine, building acoustics, exact animation sound events, weather masking, ambient noise, hearing damage, or local volume settings.
+This is less certain than a gunshot because it does not reproduce exact animation sound events, building acoustics, weather masking, ambient noise, hearing damage, or client settings.
 
 ### Audibility classifications
 
-Audio facts use:
-
 | Classification | Interpretation |
 |---|---|
-| `CAPTURED_STRONG_CUE` | A strong server-derived opportunity, such as a nearby unsuppressed shot |
-| `LIKELY_AUDIO_CUE` | The event was likely audible under ordinary conditions |
-| `POSSIBLE_AUDIO_CUE` | It could have been audible, but the model is not strong enough to explain the observation automatically |
-| `NOT_AUDIBLE_BY_MODEL` | The event is outside the configured model range or lacks usable context |
+| `CAPTURED_STRONG_CUE` | Strong server-derived opportunity, such as a nearby unsuppressed shot |
+| `LIKELY_AUDIO_CUE` | Likely audible under ordinary conditions |
+| `POSSIBLE_AUDIO_CUE` | Could have been audible, but not strong enough to explain the observation automatically |
+| `NOT_AUDIBLE_BY_MODEL` | Outside the configured model range or missing usable context |
 
-Strong gunshots can produce `KNOWN`. Likely gunshots or footsteps can produce `PLAUSIBLE`. Possible audio remains in the evidence package but does not automatically remove an observation from primary analysis.
+Strong gunshots may produce `KNOWN`. Likely gunshots or footsteps may produce `PLAUSIBLE`. Possible cues remain visible but do not automatically suppress analysis.
 
-This language is intentional. The system can say:
+The system can say:
 
-> A plausible audible cue existed.
+> A plausible audible opportunity existed.
 
 It cannot say:
 
@@ -134,172 +129,145 @@ It cannot say:
 
 ## Primary feature: hidden-threat readiness
 
-For each direct durable player identity, the analyzer counts:
+For each direct durable player ID, the analyzer counts:
 
-- hidden successes and hidden trials;
-- neutral-control successes and control trials;
-- independent sessions, encounters, and durable target identities.
+- hidden successes and trials;
+- neutral-control successes and trials;
+- independent sessions, encounters, and target identities.
 
-A beta-binomial estimate shrinks sparse rates towards a prior instead of treating a few successes as a stable player characteristic.
-
-The main reported quantity is:
+A beta-binomial estimate shrinks sparse rates toward a prior. The main reported quantity is:
 
 ```text
 readiness lift = hidden posterior rate - neutral-control posterior rate
 ```
 
-The ranking policy uses the lower confidence bound, not just the point estimate.
+Ranking uses the lower confidence bound rather than only the point estimate.
 
 ## Matched model
 
-The analyzer also creates exact-context strata within a player. A stratum must contain both hidden and neutral-control observations.
-
-Current matching context includes available variables such as:
+Exact-context strata must contain both hidden and neutral observations. Matching context includes available variables such as:
 
 - server and map;
 - coarse area cell;
 - movement band and stance;
 - baseline weapon state;
 - camera/server policy;
-- server population band;
+- population band;
 - cue class;
 - sampling-policy version.
 
-A one-coefficient conditional logistic model estimates the hidden-versus-neutral odds ratio while conditioning out the stratum intercept.
-
-Sparse, non-converged, or separated models are reported as limitations and cannot satisfy the high-priority matched-model gate.
+A conditional logistic model estimates the hidden-versus-neutral odds ratio. Sparse, non-converged, or separated models cannot satisfy the high-priority gate.
 
 ## Stability and negative controls
 
 ### Leave-one-session-out stability
 
-The primary estimate is recalculated while excluding each session in turn. A high-priority result requires the effect direction to remain stable rather than being driven by one unusual session.
+The primary estimate is recalculated while excluding each session. High-priority output requires the effect direction to remain stable rather than depend on one period.
 
 ### Negative controls
 
-Preregistered negative-control checks are run against the matched data. High-priority output is suppressed when negative controls are incomplete or fail.
+Preregistered negative-control checks validate the analysis pipeline. Incomplete or failed controls suppress high-priority output. They are not evidence against a player.
 
-Negative controls are safety checks for the analysis pipeline, not evidence against a player.
-
-## Supporting feature families
+## Supporting features
 
 ### Concealed-sector selection
 
-Event-enrichment windows can compare camera-turn direction with the bearing to a concealed target. A circular permutation test measures whether concealed sectors are selected more often than expected under shifted target bearings.
+Event-enrichment windows compare camera-turn direction with concealed-target bearing. A circular permutation test measures whether concealed sectors are selected more often than expected.
 
-This feature is supporting context. It does not bypass the primary readiness breadth and validation gates.
+This is supporting context and does not bypass primary gates.
 
 ### Pre-exposure readiness
 
-The analyzer compares a readiness interval with the first later exposed/partially exposed probe interval for the same target.
+The analyzer compares a readiness interval with the first later exposure interval for the same target.
 
-An ordering is definite only when:
+A definite ordering requires:
 
 ```text
 readiness_upper_ms < exposure_lower_ms
 ```
 
-Overlapping intervals are counted as ambiguous. Censored windows remain censored.
-
-Pre-exposure output is marked `EXPERIMENTAL_SUPPORTING_ONLY`. It cannot promote the review tier.
+Overlapping intervals remain ambiguous. Pre-exposure is `EXPERIMENTAL_SUPPORTING_ONLY` and cannot promote a review tier.
 
 ## Review tiers
-
-The current transparent ranking policy produces four tiers:
 
 | Tier | Meaning |
 |---|---|
 | `INSUFFICIENT_DATA` | Evidence breadth requirements were not met |
-| `MONITOR` | Breadth requirements passed, but the review-effect gate did not |
-| `REVIEW` | The readiness-lift lower bound passed the review gate |
-| `HIGH_PRIORITY_REVIEW` | Stronger lift, matched-model, stability, and negative-control gates passed |
+| `MONITOR` | Breadth passed, but the review-effect gate did not |
+| `REVIEW` | Readiness-lift lower bound passed the review gate |
+| `HIGH_PRIORITY_REVIEW` | Stronger lift plus matched-model, stability, and negative-control gates passed |
 
 Default breadth gates are:
 
 - at least 20 eligible hidden opportunities;
 - at least 3 independent sessions;
 - at least 5 independent encounters;
-- at least 5 independent durable target identities.
+- at least 5 independent target identities.
 
 Default lift gates are:
 
-- review when the readiness-lift lower bound is at least `0.05`;
-- possible high-priority review when it is at least `0.15` and all additional gates pass.
+- `REVIEW` at a readiness-lift lower bound of at least `0.05`;
+- possible `HIGH_PRIORITY_REVIEW` at at least `0.15` with all other gates passing.
 
-These values are policy, not universal scientific constants. A deployment should calibrate them using trusted cohorts and documented review outcomes before treating the queue as operationally useful.
+These are versioned policy values, not universal scientific constants. Each deployment should calibrate them using trusted cohorts and review outcomes.
 
 ## What an administrator should review
 
-A reviewer should not look only at the tier or the strongest incident. Review the full evidence package:
+Review the complete evidence package:
 
-1. **Identity** — direct DayZ/Steam player ID and the affected player sessions.
-2. **Data quality** — hidden, neutral, visible-positive, audio-cue, and dropped-opportunity counts; clock uncertainty; collector losses.
+1. **Identity** — direct `player_id` and affected sessions.
+2. **Data quality** — hidden, neutral, visible, audio, dropped, clock, and collector-loss counts.
 3. **Breadth** — sessions, encounters, targets, and whether one period dominates.
-4. **Effect uncertainty** — point estimates, lower bounds, matched-model convergence, and stability diagnostics.
-5. **Cue history** — prior exposure, combat, gunshots, inferred footsteps, nearby activity, and uncaptured-information limitations.
-6. **Timeline** — authoritative positions and combat facts, client transitions, visibility probes, audio opportunities, and source authority.
-7. **Spatial context** — route, related players, cue direction/distance, camera context, and coarse visibility cells.
-8. **Alternative explanations** — audio, squad communication, prediction, map knowledge, stream sniping, or telemetry gaps.
-9. **Conventional evidence** — server logs, existing anti-cheat evidence, player reports, and video where available.
+4. **Uncertainty** — lower bounds, matched-model convergence, and stability.
+5. **Cue history** — prior exposure, combat, gunshots, footsteps, and uncaptured information.
+6. **Timeline** — authoritative positions, combat, client transitions, probes, and audio opportunities.
+7. **Spatial context** — routes, related players, cue direction/distance, and coarse cells.
+8. **Alternative explanations** — squad communication, prediction, map knowledge, or telemetry gaps.
+9. **Conventional evidence** — server logs, anti-cheat evidence, reports, and video.
 
-The review result should describe observable behaviour and uncertainty. It should not convert the model output into a cheat probability.
+The conclusion should describe observable behaviour and uncertainty, not convert a tier into a cheat probability.
 
-## Admin explorer
+## Admin explorer and API
 
-The browser explorer lists direct player/session identifiers and reconstructs ordered timelines from normalized PostgreSQL data. The direct ID can be copied into other moderation, Steam, BattleMetrics, ban, or ticket systems.
+The explorer lists direct player and session IDs and reconstructs ordered timelines from PostgreSQL. The direct ID can be copied into Steam, BattleMetrics, ban, or ticket systems.
 
-Spatial evidence is rendered with different provenance:
+Spatial evidence keeps provenance separate:
 
-- exact server positions for the selected player’s route;
-- related-player server positions separately;
+- exact server positions for the selected route;
+- related-player positions separately;
 - untrusted client camera positions separately;
-- visibility `area_cell` as a coarse 100 m cell rather than a precise point.
+- visibility `area_cell` as a coarse 100 m cell.
 
-Captured `map_id` takes precedence. If the required map is unavailable, the explorer fails closed instead of plotting coordinates on a different terrain.
+Timeline requests are capped at 2,000 entries. Use `from_ms` and `to_ms` for larger sessions.
 
-Timeline requests are capped at 2,000 entries. Larger sessions should be divided with `from_ms` and `to_ms` while preserving ordering context.
+The review API exposes the direct identity as `player_id`. There is no legacy alias.
 
-Direct identities make explorer screenshots and exports more sensitive. Do not attach them to public tickets or share them outside the administrator boundary unless operational policy allows it.
+Screenshots and exports contain directly attributable player data and must remain inside the administrator boundary.
 
-## Review API concepts
+## Interpreting weak or missing output
 
-The review service stores:
+No candidate may mean:
 
-- direct durable player IDs;
-- versioned candidate rankings;
-- review cases for eligible tiers;
-- audited reviewer dispositions;
-- evidence component values and source incident IDs.
-
-The API exposes `player_id`. A legacy `player_pseudonym` field may remain temporarily for client compatibility but contains the same direct identity.
-
-A reviewer disposition is operational feedback, not perfect ground truth. It should not be fed back into model calibration without a documented labeling and quality-control process.
-
-## Interpreting missing or weak output
-
-No review candidate may mean:
-
-- visibility probing is disabled;
-- first-person validation is not configured;
+- visibility probing or first-person validation is unavailable;
 - no neutral controls were collected;
-- known or plausible cues explained the eligible incidents;
-- timing or queue delays exceeded policy;
-- the player did not meet breadth gates;
-- the matched model did not converge;
+- known or plausible cues explained eligible incidents;
+- timing or queue limits were exceeded;
+- breadth gates were not met;
+- the matched model failed;
 - stability or negative controls failed;
-- the selected raw dataset is too small;
-- retention or privacy deletion removed required history.
+- the dataset is too small;
+- retention or deletion removed required history.
 
-These outcomes are preferable to manufacturing a confident result from incomplete evidence.
+Failing closed is preferable to manufacturing confidence from incomplete evidence.
 
 ## Non-goals
 
 The analysis does not:
 
 - detect or name cheat software;
-- prove that an individual incident was impossible legitimately;
+- prove that one incident was impossible legitimately;
 - record or recreate raw audio;
-- guarantee that an inferred audio opportunity was actually heard;
-- infer communications outside the collected game state;
+- guarantee that an inferred cue was heard;
+- infer external communications;
 - replace human investigation;
-- trigger a ban, kick, warning, or other gameplay action.
+- trigger a ban, kick, warning, or gameplay action.
