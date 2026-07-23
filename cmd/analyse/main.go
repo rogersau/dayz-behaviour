@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rogersau/dayz-behaviour/internal/cues"
 	"github.com/rogersau/dayz-behaviour/internal/features"
-	"github.com/rogersau/dayz-behaviour/internal/identity"
 	"github.com/rogersau/dayz-behaviour/internal/observations"
 	"github.com/rogersau/dayz-behaviour/internal/postgres"
 	"github.com/rogersau/dayz-behaviour/internal/ranking"
@@ -20,10 +20,9 @@ import (
 
 type output struct {
 	ObservationBuilderVersion string      `json:"observation_builder_version"`
+	AudioCueLedgerVersion     string      `json:"audio_cue_ledger_version"`
 	FeatureAlgorithmVersion   string      `json:"feature_algorithm_version"`
 	RankingPolicyVersion      string      `json:"ranking_policy_version"`
-	PseudonymPolicyVersion    string      `json:"pseudonym_policy_version"`
-	PseudonymKeyID            string      `json:"pseudonym_key_id"`
 	ObservationCount          int         `json:"observation_count"`
 	Candidates                []candidate `json:"candidates"`
 	DataQuality               dataQuality `json:"data_quality"`
@@ -31,7 +30,7 @@ type output struct {
 }
 
 type candidate struct {
-	PlayerPseudonym  string                          `json:"player_pseudonym"`
+	PlayerID         string                          `json:"player_id"`
 	PlayerSessions   []string                        `json:"player_sessions"`
 	Readiness        features.ReadinessResult        `json:"readiness"`
 	MatchedModel     features.ConditionalLogitResult `json:"matched_model"`
@@ -43,11 +42,14 @@ type candidate struct {
 }
 
 type dataQuality struct {
-	StrongHiddenObservationCount   int      `json:"strong_hidden_observation_count"`
-	NeutralControlObservationCount int      `json:"neutral_control_observation_count"`
-	VisiblePositiveControlCount    int      `json:"visible_positive_control_observation_count"`
-	DroppedRandomOpportunityCount  int      `json:"dropped_random_opportunity_count"`
-	Limitations                    []string `json:"limitations"`
+	StrongHiddenObservationCount     int      `json:"strong_hidden_observation_count"`
+	NeutralControlObservationCount   int      `json:"neutral_control_observation_count"`
+	VisiblePositiveControlCount      int      `json:"visible_positive_control_observation_count"`
+	DroppedRandomOpportunityCount    int      `json:"dropped_random_opportunity_count"`
+	AudioExplanatoryObservationCount int      `json:"audio_explanatory_observation_count"`
+	GunshotCueCount                  int      `json:"gunshot_cue_count"`
+	FootstepCueCount                 int      `json:"footstep_cue_count"`
+	Limitations                      []string `json:"limitations"`
 }
 
 func main() {
@@ -55,13 +57,8 @@ func main() {
 	databaseURL := flag.String("database-url", os.Getenv("DBA_DATABASE_URL"), "optional PostgreSQL URL for durable analysis output")
 	flag.Parse()
 
-	pseudonymPolicy, err := identity.CurrentPolicy()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	var batches []schema.Batch
-	_, err = replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
+	_, err := replay.Run(context.Background(), *rawRoot, replay.SinkFunc(func(_ context.Context, batch schema.Batch) error {
 		batches = append(batches, batch)
 		return nil
 	}))
@@ -72,18 +69,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := cues.Enrich(built, batches, cues.DefaultConfig()); err != nil {
+		log.Fatal(err)
+	}
 
 	players := map[string]map[string]struct{}{}
 	result := output{
 		ObservationBuilderVersion: observations.BuilderVersion,
+		AudioCueLedgerVersion:     cues.LedgerVersion,
 		FeatureAlgorithmVersion:   features.ReadinessAlgorithmVersion,
 		RankingPolicyVersion:      ranking.PolicyVersion,
-		PseudonymPolicyVersion:    pseudonymPolicy.Version,
-		PseudonymKeyID:            pseudonymPolicy.KeyID,
 		ObservationCount:          len(built),
 	}
 	for _, observation := range built {
-		playerID := playerPseudonym(observation.ObserverPlayerSessionID)
+		playerID := playerIDFromSession(observation.ObserverPlayerSessionID)
 		if players[playerID] == nil {
 			players[playerID] = map[string]struct{}{}
 		}
@@ -96,6 +95,17 @@ func main() {
 		}
 		if observation.PositiveControlEligible {
 			result.DataQuality.VisiblePositiveControlCount++
+		}
+		if (observation.CueClass == "KNOWN" || observation.CueClass == "PLAUSIBLE") && countAudioFacts(observation.CueFacts) > 0 {
+			result.DataQuality.AudioExplanatoryObservationCount++
+		}
+		for _, fact := range observation.CueFacts {
+			switch fact.CueType {
+			case "GUNSHOT_AUDIO_OPPORTUNITY":
+				result.DataQuality.GunshotCueCount++
+			case "FOOTSTEP_AUDIO_OPPORTUNITY":
+				result.DataQuality.FootstepCueCount++
+			}
 		}
 	}
 	result.DataQuality.DroppedRandomOpportunityCount = countDroppedRandomOpportunities(batches)
@@ -121,8 +131,8 @@ func main() {
 		preExposure := estimatePreExposureForSessions(sessions, built)
 		decision := ranking.ApplyValidatedEvidence(readiness, matched, stability, negativeControls, ranking.DefaultGates())
 		result.Candidates = append(result.Candidates, candidate{
-			PlayerPseudonym:  playerID,
-			PlayerSessions:   pseudonymousSessions(sessions),
+			PlayerID:         playerID,
+			PlayerSessions:   sessions,
 			Readiness:        readiness,
 			MatchedModel:     matched,
 			Stability:        stability,
@@ -131,7 +141,7 @@ func main() {
 			PreExposure:      preExposure,
 			ReviewPriority:   decision,
 		})
-		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerPseudonym: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: decision})
+		persistentCandidates = append(persistentCandidates, postgres.AnalysisCandidate{PlayerID: playerID, PlayerSessions: sessions, Readiness: readiness, Matched: matched, Stability: stability, Controls: negativeControls, Sector: sector, PreExposure: preExposure, Decision: decision})
 	}
 	if *databaseURL != "" {
 		ctx := context.Background()
@@ -166,10 +176,8 @@ func main() {
 		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
 			"no random prospective opportunities were available")
 	}
-	if pseudonymPolicy.Version == identity.LegacyPolicyVersion {
-		result.DataQuality.Limitations = append(result.DataQuality.Limitations,
-			"unkeyed development pseudonyms are active; configure DBA_PSEUDONYM_SECRET and DBA_PSEUDONYM_KEY_ID before production collection")
-	}
+	result.DataQuality.Limitations = append(result.DataQuality.Limitations,
+		"audio cues are server-derived audibility opportunities, not proof that a player heard a sound")
 
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -178,20 +186,21 @@ func main() {
 	}
 }
 
-func playerPseudonym(playerSessionID string) string {
-	value := playerSessionID
+func playerIDFromSession(playerSessionID string) string {
 	if index := strings.LastIndex(playerSessionID, ":"); index >= 0 {
-		value = playerSessionID[index+1:]
+		return playerSessionID[index+1:]
 	}
-	return identity.DurableID(value)
+	return playerSessionID
 }
 
-func pseudonymousSessions(input []string) []string {
-	result := make([]string, 0, len(input))
-	for _, value := range input {
-		result = append(result, identity.SessionID(value))
+func countAudioFacts(input []observations.CueFact) int {
+	count := 0
+	for _, fact := range input {
+		if fact.CueType == "GUNSHOT_AUDIO_OPPORTUNITY" || fact.CueType == "FOOTSTEP_AUDIO_OPPORTUNITY" {
+			count++
+		}
 	}
-	return result
+	return count
 }
 
 func countDroppedRandomOpportunities(batches []schema.Batch) int {

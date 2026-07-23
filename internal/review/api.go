@@ -14,7 +14,7 @@ import (
 
 type Candidate struct {
 	CandidateID               string            `json:"candidate_id"`
-	PlayerPseudonym           string            `json:"player_pseudonym"`
+	PlayerID                  string            `json:"player_id"`
 	ReviewPriority            string            `json:"review_priority"`
 	ReadinessEffect           float64           `json:"readiness_effect"`
 	ReadinessLowerBound       float64           `json:"readiness_lower_bound"`
@@ -417,10 +417,10 @@ body{font:15px system-ui;margin:2rem;max-width:1100px;color:#17202a}label{displa
 </style></head><body><h1>Behavioural awareness review</h1>
 <p><small>Outlier evidence supports manual review only. It is not proof of cheating and cannot trigger gameplay action.</small></p>
 <label>Review token <input id="token" type="password" autocomplete="off"> <button id="load">Load candidates</button></label>
-<p id="status"></p><table><thead><tr><th>Pseudonym</th><th>Priority</th><th>Readiness effect</th><th>Sessions</th><th>Encounters</th><th>Targets</th></tr></thead><tbody id="rows"></tbody></table>
+<p id="status"></p><table><thead><tr><th>Player ID</th><th>Priority</th><th>Readiness effect</th><th>Sessions</th><th>Encounters</th><th>Targets</th></tr></thead><tbody id="rows"></tbody></table>
 <script>
 const status=document.getElementById('status'),rows=document.getElementById('rows');
-document.getElementById('load').onclick=async()=>{status.textContent='Loading…';rows.replaceChildren();try{const response=await fetch('/v1/review-candidates',{headers:{Authorization:'Bearer '+document.getElementById('token').value}});if(!response.ok)throw new Error('HTTP '+response.status);const data=await response.json();for(const item of data.candidates||[]){const tr=document.createElement('tr');for(const value of [item.player_pseudonym,item.review_priority,item.readiness_effect,item.independent_session_count,item.independent_encounter_count,item.independent_target_count]){const td=document.createElement('td');td.textContent=value??'';tr.appendChild(td)}rows.appendChild(tr)}status.textContent=(data.candidates||[]).length+' candidate(s)';status.className=''}catch(error){status.textContent=String(error);status.className='error'}};
+document.getElementById('load').onclick=async()=>{status.textContent='Loading…';rows.replaceChildren();try{const response=await fetch('/v1/review-candidates',{headers:{Authorization:'Bearer '+document.getElementById('token').value}});if(!response.ok)throw new Error('HTTP '+response.status);const data=await response.json();for(const item of data.candidates||[]){const tr=document.createElement('tr');for(const value of [item.player_id,item.review_priority,item.readiness_effect,item.independent_session_count,item.independent_encounter_count,item.independent_target_count]){const td=document.createElement('td');td.textContent=value??'';tr.appendChild(td)}rows.appendChild(tr)}status.textContent=(data.candidates||[]).length+' candidate(s)';status.className=''}catch(error){status.textContent=String(error);status.className='error'}};
 </script></body></html>`
 
 func secureEqual(left, right string) bool {

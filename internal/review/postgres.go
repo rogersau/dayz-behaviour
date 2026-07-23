@@ -59,7 +59,7 @@ func scanCandidate(row scanner) (Candidate, error) {
 	var value Candidate
 	var components []byte
 	var policy string
-	if err := row.Scan(&value.CandidateID, &value.PlayerPseudonym, &policy, &value.ReviewPriority, &components, &value.CreatedAt); err != nil {
+	if err := row.Scan(&value.CandidateID, &value.PlayerID, &policy, &value.ReviewPriority, &components, &value.CreatedAt); err != nil {
 		return value, err
 	}
 	if len(components) > 0 {

@@ -2,16 +2,16 @@
 
 ## Purpose
 
-DayZ Behaviour collects a deliberately limited set of game observations and uses them to identify repeated hidden-awareness patterns for manual administrator review.
+DayZ Behaviour collects a bounded set of game observations and uses them to identify repeated hidden-awareness patterns for manual administrator review.
 
-The system is designed around four constraints:
+The design has four rules:
 
-1. DayZ collection must remain bounded and should not perform historical analysis in the game loop.
-2. Server-authoritative facts and untrusted client context must remain distinguishable.
-3. Uncertainty and missing information must reduce confidence rather than create suspicion.
-4. Historical data and algorithm versions must remain replayable and auditable.
+1. collection must remain bounded and lightweight inside DayZ;
+2. server-authoritative facts must remain distinct from client observations;
+3. missing or uncertain data must reduce confidence rather than create suspicion;
+4. raw evidence and algorithm versions must remain replayable and auditable.
 
-It is not designed to identify cheat software, prove the presence of DMA hardware, reproduce a player’s rendered screen or audio, or automatically enforce a punishment.
+The system does not identify cheat software, recreate a player’s screen or audio, or automatically enforce punishments.
 
 ## System overview
 
@@ -19,11 +19,11 @@ It is not designed to identify cheat software, prove the presence of DMA hardwar
 ┌──────────────────────── DayZ process ────────────────────────┐
 │                                                              │
 │  Client collector                   Server collector          │
-│  - camera direction                 - identity and sessions   │
+│  - camera direction                 - direct player identity  │
 │  - raised/ADS/optics state          - lifecycle and combat    │
 │  - transition intervals             - authoritative position  │
-│  - collector health                 - bounded visibility       │
-│           │                                   │               │
+│  - collector health                 - audio opportunities      │
+│           │                          - bounded visibility       │
 │           └──────── authenticated RPC ────────┘               │
 │                                               │               │
 │                                  asynchronous HTTP export     │
@@ -48,57 +48,59 @@ It is not designed to identify cheat software, prove the presence of DMA hardwar
 
 ### DayZ client collector
 
-The client collector observes information available only on the local client, including:
+The client observes information available only on the local client:
 
 - camera position and direction;
 - weapon-raised, iron-sight, optics, and third-person state;
-- bounded local transition detection;
-- a short pre-event sample ring and post-event burst samples;
+- bounded transition detection;
+- a short pre-event sample ring and post-event burst;
 - client collector health.
 
-This data is useful for reconstructing behaviour, but it is not trusted as proof. The server attributes RPCs using its own `PlayerIdentity`; client-supplied identity is not accepted.
+This is Tier B supporting context. The server attributes every RPC using its own `PlayerIdentity`; client-supplied identity is not accepted.
 
 ### DayZ server collector
 
-The server collector owns the authoritative game-side context:
+The server owns the authoritative game-side context:
 
-- player identity and player-session lifecycle;
-- authoritative position, movement, alive, and unconscious state;
-- hit, kill, and server-side fire events where the script seam is valid;
+- direct durable player identity and player-session lifecycle;
+- authoritative position, velocity, alive, and unconscious state;
+- hit, kill, and fire events where the script callback is valid;
+- gunshot and movement-audio opportunities;
 - random prospective sampling opportunities;
 - bounded observer/target visibility probes;
 - clock challenges, queue health, export health, and spool state.
 
-The collector performs only bounded current-world work. It does not scan every player pair every frame and does not calculate long-term player rankings.
+It performs only bounded current-world work. It does not scan every player pair every frame or calculate historical rankings.
 
 ### `ingestd`
 
 `ingestd` is the local HTTP receiver. It:
 
-- requires an ingest credential unless explicitly placed in unauthenticated development mode;
-- validates the batch envelope and event invariants;
+- authenticates the DayZ exporter;
+- validates batch and event invariants;
 - persists each batch as an immutable, fsynced JSON file;
-- imports DayZ failed-export spool files;
+- imports failed-export spool files;
 - rejects an existing batch identity when its contents differ.
 
-The DayZ query token exists because `RestContext` cannot set a general authorization header. That endpoint is intended for loopback or a private sidecar boundary, not direct internet exposure.
+The DayZ query token is intended for a loopback or private sidecar boundary, not direct internet exposure.
 
 ### `normalize`
 
-`normalize` replays immutable raw batches into PostgreSQL. It:
+`normalize` replays raw batches into PostgreSQL. It stores direct player and session identifiers exactly as collected, along with:
 
-- converts known identity fields into deterministic pseudonyms;
-- stores events, sessions, sampling opportunities, visibility runs, and analysis inputs;
-- preserves source authority and algorithm/schema versions;
-- applies database migrations and verifies migration checksums.
+- normalized events;
+- player sessions;
+- sampling opportunities;
+- visibility probe results;
+- source authority and schema versions.
 
-Normalization is idempotent. Raw files remain the source of truth for replay.
+Normalization is idempotent. Raw files remain the source of truth.
 
 ### `analyse`
 
-`analyse` rebuilds observations from raw telemetry, calculates features, applies validation gates, and optionally persists results to PostgreSQL.
+`analyse` rebuilds observations from raw telemetry, enriches them with cue facts, calculates features, applies validation gates, and optionally persists results.
 
-The primary feature family compares reactions during validated concealed-target opportunities with reactions during neutral no-relevant-target opportunities. Other feature families are supporting context and do not independently establish a review tier.
+The primary feature compares reactions during validated concealed-target opportunities with reactions during neutral no-relevant-target opportunities.
 
 ### `reviewd`
 
@@ -106,142 +108,158 @@ The primary feature family compares reactions during validated concealed-target 
 
 - a Steam-authenticated browser explorer;
 - bearer-authenticated review APIs;
-- pseudonymized session search;
+- direct `player_id` and player-session identifiers;
 - ordered timelines with authority and payload context;
-- local DayZ map tiles and spatial evidence;
+- local DayZ maps and spatial evidence;
 - review cases and audited dispositions.
 
-It is read-only with respect to DayZ. No endpoint can ban, kick, message, or alter a player in the game.
+It is read-only with respect to DayZ. It cannot ban, kick, message, or otherwise alter a player in game.
 
 ## Trust and authority
 
-Events retain an authority tier throughout ingestion, normalization, analysis, and review.
-
 | Tier | Meaning | Examples |
 |---|---|---|
-| A | Server-authoritative game fact | lifecycle, server position, combat callback, visibility geometry |
-| B | Untrusted client observation | camera sample, ADS/optics transition, local timing interval |
+| A | Server-authoritative game fact | identity, lifecycle, position, combat callback, visibility geometry |
+| B | Untrusted client observation | camera sample, ADS/optics transition, client timing interval |
 | C | Collector or pipeline health | queue depth, drops, export failures, clock quality |
 
-Tier B data can help explain when or how a player reacted. It cannot create strong hidden-target evidence without corresponding Tier A geometry and acceptable timing.
+Tier B data can describe when or how a player reacted. It cannot create strong hidden-target evidence without corresponding Tier A context.
 
-Tier C data never strengthens a player signal. Missing data, excessive timing uncertainty, queue delay, or collection loss can only suppress eligibility or lower confidence.
+Tier C data never strengthens a player signal. Missing telemetry, excessive uncertainty, queue delay, or collection loss can only suppress eligibility or lower confidence.
 
 ## Identity and sessions
 
-The raw tier contains durable DayZ identity because the server needs it for attribution, joining, reconnect handling, and deletion.
+The server records the durable identity returned by `PlayerIdentity.GetId()`. On Steam servers this is normally the SteamID64 used by other moderation systems.
 
-The server assigns a distinct `player_session_id` for each connected character/session lifecycle. Client sequence and rate-limit state is reset when the player disconnects or reconnects, so a restarted collector can safely begin its sequences again.
-
-Normalized and review data uses two pseudonym domains:
+Each connected lifecycle also receives a session ID:
 
 ```text
-dp_<HMAC-SHA256>  durable player identity
-ps_<HMAC-SHA256>  player-session identity
+<server-session-id>:<session-sequence>:<durable-player-id>
 ```
 
-The pseudonym policy and key ID are stored in PostgreSQL. A process using a different key fails closed because silently changing identity namespaces would break joins and deletion.
+Direct IDs are stored throughout raw data, PostgreSQL, analysis output, review APIs, and the explorer. There is no anonymized identity mode or compatibility alias.
+
+Because identities are direct, access control and retention are the privacy boundary. Databases, API responses, screenshots, exports, logs, and backups must be treated as sensitive administrative data.
+
+## Audio-cue model
+
+The system records no microphone input and no raw game audio. It creates server-derived **audio opportunities**.
+
+### Gunshots
+
+`Weapon_Base.EEFired(int muzzleType, int mode, string ammoType)` records:
+
+- shooter identity and session;
+- server timestamp and position;
+- weapon and ammunition type;
+- muzzle type and fire mode;
+- suppressor presence and type.
+
+The Go model compares the shot position with the observer’s latest authoritative position at or before the shot and assigns:
+
+- `CAPTURED_STRONG_CUE`;
+- `LIKELY_AUDIO_CUE`;
+- `POSSIBLE_AUDIO_CUE`;
+- `NOT_AUDIBLE_BY_MODEL`.
+
+Suppressed and unsuppressed shots use separate versioned range bands.
+
+### Footsteps and movement
+
+At a bounded server cadence, moving players generate `MOVEMENT_AUDIO_OPPORTUNITY` events containing:
+
+- authoritative position and velocity-derived speed;
+- a coarse gait band;
+- stance;
+- surface type from `SurfaceGetType3D`;
+- the item in the `Feet` attachment slot.
+
+Go estimates likely and maximum footstep ranges from these fields. It does not reproduce the complete DayZ sound engine, indoor acoustics, weather masking, animation-specific samples, hearing damage, or client volume settings.
+
+### Cue safety
+
+A cue means:
+
+> Captured game state supports a plausible opportunity for the observer to hear the target.
+
+It does not mean:
+
+> The observer definitely heard and correctly localized the target.
+
+Strong or likely cues may classify an observation as known or plausible. Possible cues remain visible to reviewers but do not automatically suppress primary analysis.
 
 ## Time model
 
-DayZ server time is monotonic only within one `server_session_id`. Events from different server sessions are never joined using their relative timestamps.
+DayZ server time is monotonic only within one `server_session_id`. Events from different server sessions are never joined by relative timestamp.
 
-Client transitions are sampled, so the true transition occurred within an interval rather than at an exact point:
+Client transitions are sampled, so the true transition occurred within an interval:
 
 ```text
 event_time_lower_ms <= true event time <= event_time_upper_ms
 ```
 
-The server issues single-use clock challenges and maps client intervals into server time using the latest accepted offset and uncertainty. When alignment is missing or uncertainty is too large, timing-sensitive evidence is suppressed.
+The server issues single-use clock challenges and maps client intervals into server time using the latest accepted offset and uncertainty. Missing or poor alignment suppresses timing-sensitive evidence.
 
 ## Sampling model
 
 ### Random prospective opportunities
 
-Random opportunities are the primary statistical stream. Each eligible observer receives randomized triggers. The collector records:
+Random opportunities are the primary statistical stream. The collector records risk-set size, inclusion probability, queue admission, queue delay, load state, and policy version.
 
-- observer and target risk-set sizes;
-- inclusion probabilities;
-- queue-admission probability;
-- queue delay and scheduler state;
-- sampling policy version and reason.
+Opportunity types are:
 
-The possible opportunity types are:
+- validated concealed target — hidden condition;
+- no relevant target inside the configured risk set — neutral control;
+- exposed or partially exposed target — visible positive control.
 
-- validated concealed target — the hidden condition;
-- no relevant target inside the configured risk set — the neutral control;
-- exposed or partially exposed target — a positive control used to verify ordinary responsiveness.
-
-Visible players are not used as the neutral baseline for hidden-awareness lift.
+Visible targets are not the neutral baseline.
 
 ### Event enrichment
 
-A compact client decision edge can request bounded, lower-priority diagnostic probing around one observer/target pair. This stream helps reconstruct exposure timing and concealed-sector behaviour, but it is kept separate from random prospective opportunities to avoid selection bias in the primary estimate.
+A compact client decision edge can request bounded, lower-priority probing around one observer/target pair. This helps reconstruct timing and direction but remains separate from the random stream to avoid selection bias.
 
 ### Independence
 
-Repeated samples close together are grouped into windows, target episodes, and encounters. Evidence breadth is counted across distinct sessions, encounters, and durable target identities, not raw event volume.
+Closely spaced observations are grouped into refractory windows, target episodes, and encounters. Evidence breadth counts distinct sessions, encounters, and durable target identities rather than raw event volume.
 
 ## Visibility safety
 
-A head-origin ray is not automatically equivalent to what a player could see, especially in third person.
+A server head-origin ray is not automatically equivalent to what a player could see, especially in third person.
 
-Strong concealed-target evidence therefore requires all of the following:
+Strong concealed-target evidence requires:
 
-- Tier A server-side geometry;
-- a server that actually enforces first person;
+- Tier A server geometry;
+- a server that enforces first person;
 - `server_first_person_only=true`;
 - `visibility_origin_mode=VALIDATED_FIRST_PERSON_HEAD`;
-- a non-empty validation ID from a controlled fixture;
-- repeated occlusion for at least the configured duration;
-- acceptable queue delay and event timing.
+- a recorded validation ID;
+- repeated occlusion for the configured duration;
+- acceptable queue and timing quality.
 
-Without those conditions, visibility remains descriptive or supporting context and cannot become strong hidden evidence.
+Without those conditions, visibility remains descriptive context.
 
 ## Storage and replay
 
-### Raw tier
-
-Each batch is stored as an immutable JSON file under:
+Raw batches are stored under:
 
 ```text
 <raw-root>/<server-id>/<server-session-id>/<batch-sequence>.json
 ```
 
-Writes use a temporary file, fsync, atomic rename, and a directory sync where supported. Reusing a batch identity with different contents is treated as a conflict.
+Writes use a temporary file, fsync, atomic rename, and directory sync where supported. Reusing a batch identity with different contents is an error.
 
-### PostgreSQL tier
+PostgreSQL stores normalized events, sessions, sampling opportunities, visibility evidence, observations, features, rankings, cases, and dispositions. Derived data can be rebuilt from retained raw batches.
 
-PostgreSQL stores normalized events, sessions, sampling opportunities, visibility evidence, observations, feature results, review rankings, cases, and review dispositions.
-
-Database data is derived and can be rebuilt from retained raw batches, subject to retention and privacy deletion.
-
-### Versioning
-
-- breaking transport changes increment `schema_version`;
-- sampling, visibility, observation, feature, matching, and ranking policies carry explicit version identifiers;
-- applied SQL migrations are checksum-verified;
-- historical raw data can be replayed with a newer analysis implementation without rewriting the original evidence.
+Transport, sampling, visibility, observation, cue, feature, matching, and ranking policies carry explicit version identifiers. SQL migrations are checksum-verified.
 
 ## Failure behaviour
 
-The system is intended to fail conservatively:
+The system fails conservatively:
 
-- network failure causes DayZ export batches to be spooled to disk;
-- queue and spool limits are bounded and reported through health events;
-- stale or dead observer/target entities are revalidated before a visibility probe;
+- network failure spools export batches to disk;
+- queues and spool files are bounded and measured;
+- stale observer/target entities are revalidated before probes;
 - malformed, unauthorized, conflicting, or impossible batches are rejected;
-- unavailable map data is not substituted with a different terrain;
-- missing telemetry or failed negative controls suppresses higher review tiers;
-- no failure mode creates automatic gameplay enforcement.
-
-## Repository layout
-
-```text
-cmd/                    runnable Go services and tools
-dayz/BehaviourProbe/    DayZ client/server mod source
-deploy/                 Docker Compose deployment
-internal/               ingestion, replay, normalization, features, review UI
-pkg/schema/             transport schema and validation
-docs/                   newcomer and operator guides
-```
+- missing maps are not substituted with another terrain;
+- missing telemetry or failed validation gates suppresses review tiers;
+- no failure mode creates automatic enforcement.

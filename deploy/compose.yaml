@@ -43,8 +43,6 @@ services:
       DBA_PUBLIC_BASE_URL: ${DBA_PUBLIC_BASE_URL:-http://127.0.0.1:8082}
       DBA_STEAM_ADMIN_IDS: ${DBA_STEAM_ADMIN_IDS:?set comma-separated SteamID64 admin allowlist}
       DBA_SESSION_SECRET: ${DBA_SESSION_SECRET:?set a random secret of at least 32 characters}
-      DBA_PSEUDONYM_SECRET: ${DBA_PSEUDONYM_SECRET:?set a stable random secret of at least 32 characters}
-      DBA_PSEUDONYM_KEY_ID: ${DBA_PSEUDONYM_KEY_ID:?set a stable pseudonym key identifier}
       DBA_MAP_DIR: /app/maps
       DBA_DEFAULT_MAP: ${DBA_DEFAULT_MAP:-chernarusplus}
       DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
@@ -63,8 +61,6 @@ services:
     command: ["-raw-dir", "/data/raw", "-watch-interval", "5s"]
     environment:
       DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
-      DBA_PSEUDONYM_SECRET: ${DBA_PSEUDONYM_SECRET:?set a stable random secret of at least 32 characters}
-      DBA_PSEUDONYM_KEY_ID: ${DBA_PSEUDONYM_KEY_ID:?set a stable pseudonym key identifier}
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,8 +76,6 @@ services:
     command: ["-raw-dir", "/data/raw"]
     environment:
       DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
-      DBA_PSEUDONYM_SECRET: ${DBA_PSEUDONYM_SECRET:?set a stable random secret of at least 32 characters}
-      DBA_PSEUDONYM_KEY_ID: ${DBA_PSEUDONYM_KEY_ID:?set a stable pseudonym key identifier}
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,8 +91,6 @@ services:
     command: ["-raw-dir", "/data/raw"]
     environment:
       DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
-      DBA_PSEUDONYM_SECRET: ${DBA_PSEUDONYM_SECRET:?set a stable random secret of at least 32 characters}
-      DBA_PSEUDONYM_KEY_ID: ${DBA_PSEUDONYM_KEY_ID:?set a stable pseudonym key identifier}
     depends_on:
       postgres:
         condition: service_healthy

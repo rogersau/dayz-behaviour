@@ -13,7 +13,7 @@
       <div class="mark">DB</div>
       <p class="eyebrow">ADMIN REVIEW</p>
       <h1>Behaviour Explorer</h1>
-      <p>Explore pseudonymized server evidence in context. Findings support manual review; they are not proof of cheating.</p>
+      <p>Explore direct-identity server evidence in context. Findings support manual review; they are not proof of cheating.</p>
       <a class="steam-button" href="/auth/steam/login">Sign in through Steam</a>
     </div>
   </section>
@@ -25,12 +25,12 @@
     </header>
     <aside class="sidebar">
       <div class="sidebar-heading"><div><p class="eyebrow">PLAYER SESSIONS</p><span id="session-count">0 sessions</span></div><button id="refresh" class="icon" title="Refresh">↻</button></div>
-      <label class="search"><span>⌕</span><input id="session-search" placeholder="Search pseudonym or server" autocomplete="off"></label>
+      <label class="search"><span>⌕</span><input id="session-search" placeholder="Search player ID or server" autocomplete="off"></label>
       <div id="sessions" class="sessions"></div>
     </aside>
     <main class="main">
       <section id="empty" class="empty">
-        <div class="empty-icon">⌁</div><h2>Select a player session</h2><p>Choose a session to reconstruct its telemetry and surrounding visibility context.</p>
+        <div class="empty-icon">⌁</div><h2>Select a player session</h2><p>Choose a session to reconstruct its telemetry and surrounding visibility and audio-cue context.</p>
       </section>
       <section id="workspace" class="hidden">
         <div class="title-row">
@@ -55,7 +55,7 @@
         </section>
         <div class="controls">
           <label>Event type<select id="event-filter"><option value="">All events</option></select></label>
-          <label>Find in context<input id="event-search" placeholder="event, target, detail…"></label>
+          <label>Find in context<input id="event-search" placeholder="event, target, cue, detail…"></label>
           <label class="toggle"><input id="context-toggle" type="checkbox" checked><span>Include related-player context</span></label>
         </div>
         <div id="notice" class="notice hidden"></div>

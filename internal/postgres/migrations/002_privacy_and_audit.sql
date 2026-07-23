@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS privacy_audit_log (
     privacy_audit_id text PRIMARY KEY,
     action text NOT NULL,
-    subject_pseudonym text NOT NULL,
+    subject_player_id text NOT NULL,
     actor text NOT NULL,
     reason text NOT NULL,
     affected_counts jsonb NOT NULL,

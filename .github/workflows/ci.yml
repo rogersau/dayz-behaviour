@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +43,18 @@ jobs:
       - name: Test schema packages
         run: go test ./pkg/...
       - name: Test internal packages
-        run: go test ./internal/...
+        id: internal-tests
+        continue-on-error: true
+        run: go test ./internal/... > internal-tests.log 2>&1
+      - name: Upload internal test failure log
+        if: steps.internal-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-tests-log
+          path: internal-tests.log
+      - name: Fail after internal test log upload
+        if: steps.internal-tests.outcome == 'failure'
+        run: exit 1
       - name: Compile analyse command
         run: go test ./cmd/analyse
       - name: Compile ingestd command
@@ -86,6 +98,4 @@ jobs:
           DBA_REVIEW_TOKEN: test-review-token
           DBA_STEAM_ADMIN_IDS: "76561198000000000"
           DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
-          DBA_PSEUDONYM_SECRET: test-pseudonym-secret-at-least-32-characters
-          DBA_PSEUDONYM_KEY_ID: test-v1
         run: docker compose -f deploy/compose.yaml config --quiet
