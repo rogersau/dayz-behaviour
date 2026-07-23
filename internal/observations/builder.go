@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	BuilderVersion      = "observation-builder-v1"
+	BuilderVersion      = "observation-builder-v2"
 	IndependenceVersion = "episode-window-v1"
 )
 
@@ -49,6 +49,7 @@ type Observation struct {
 	AreaCell                   string    `json:"area_cell"`
 	ObserverPlayerSessionID    string    `json:"observer_player_session_id"`
 	TargetPlayerSessionID      string    `json:"target_player_session_id"`
+	TargetIdentityKey          string    `json:"-"`
 	StartedMS                  int64     `json:"started_ms"`
 	ClosedMS                   int64     `json:"closed_ms"`
 	SamplingStream             string    `json:"sampling_stream"`
@@ -146,7 +147,7 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 		if targetSession == "" {
 			targetSession = current.batch.ServerSessionID + ":" + current.data.TargetPlayerID
 		}
-		cueClassification, cueFact := cueClass(events, index, current.event.PlayerSessionID, current.data.TargetPlayerID, started)
+		cueClassification, cueFact := cueClass(events, index, current, current.event.PlayerSessionID, current.data.TargetPlayerID, started)
 		observation := Observation{
 			OpportunityID:              current.id,
 			ServerSessionID:            current.batch.ServerSessionID,
@@ -155,6 +156,7 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			AreaCell:                   current.data.AreaCell,
 			ObserverPlayerSessionID:    current.event.PlayerSessionID,
 			TargetPlayerSessionID:      targetSession,
+			TargetIdentityKey:          targetIdentityKey(current.data.TargetPlayerID, targetSession),
 			StartedMS:                  started,
 			ClosedMS:                   started + config.DecisionWindowMS,
 			SamplingStream:             current.data.SamplingStream,
@@ -182,13 +184,13 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 			observation.CueFacts = append(observation.CueFacts, *cueFact)
 			observation.SourceEventIDs = append(observation.SourceEventIDs, cueFact.SourceEventID)
 		}
-		observation.OutcomeObserved, observation.OutcomeObservedMS, observation.OutcomeAuthority, observation.SourceEventIDs = readinessOutcome(events, index+1, observation, observation.SourceEventIDs)
-		observation.FirstExposureMS, observation.ExposureCause, observation.ExposureWindowCensored, observation.SourceEventIDs = firstExposure(events, index+1, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
+		observation.OutcomeObserved, observation.OutcomeObservedMS, observation.OutcomeAuthority, observation.SourceEventIDs = readinessOutcome(events, index+1, current, observation, observation.SourceEventIDs)
+		observation.FirstExposureMS, observation.ExposureCause, observation.ExposureWindowCensored, observation.SourceEventIDs = firstExposure(events, index+1, current, observation, current.data.TargetPlayerID, observation.SourceEventIDs)
 		observation.TimingEligible = observation.QueueDelayMS >= 0 && observation.QueueDelayMS <= config.MaxQueueDelayMS
 		observation.TimingPolicyVersion = fmt.Sprintf("%s:max-queue-%dms", config.TimingPolicyVersion, config.MaxQueueDelayMS)
 		observation.StrongHiddenEligible = observation.VisibilityClass == "ROBUSTLY_OCCLUDED" &&
 			observation.VisibilityAuthority == "A" &&
-			observation.ObserverOriginMode == "FIRST_PERSON_EYE" &&
+			validatedFirstPersonOrigin(observation.ObserverOriginMode) &&
 			observation.VisibilityValidationID != "" && observation.OcclusionDurationMS > 0 &&
 			observation.TimingEligible &&
 			observation.TargetInclusionProbability > 0 &&
@@ -207,9 +209,12 @@ func Build(batches []schema.Batch, config Config) ([]Observation, error) {
 	return result, nil
 }
 
-func firstExposure(events []flatEvent, startIndex int, observation Observation, targetID string, sourceIDs []string) (int64, string, bool, []string) {
+func firstExposure(events []flatEvent, startIndex int, origin flatEvent, observation Observation, targetID string, sourceIDs []string) (int64, string, bool, []string) {
 	const exposureHorizonMS = int64(30_000)
 	for _, candidate := range events[startIndex:] {
+		if !sameServerSession(origin, candidate) {
+			break
+		}
 		if candidate.event.ServerTimeMS > observation.StartedMS+exposureHorizonMS {
 			break
 		}
@@ -280,6 +285,12 @@ func flatten(batches []schema.Batch) ([]flatEvent, error) {
 		}
 	}
 	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].batch.ServerID != events[j].batch.ServerID {
+			return events[i].batch.ServerID < events[j].batch.ServerID
+		}
+		if events[i].batch.ServerSessionID != events[j].batch.ServerSessionID {
+			return events[i].batch.ServerSessionID < events[j].batch.ServerSessionID
+		}
 		if events[i].event.ServerTimeMS == events[j].event.ServerTimeMS {
 			return events[i].event.ServerSequence < events[j].event.ServerSequence
 		}
@@ -288,8 +299,11 @@ func flatten(batches []schema.Batch) ([]flatEvent, error) {
 	return events, nil
 }
 
-func readinessOutcome(events []flatEvent, startIndex int, observation Observation, sourceIDs []string) (bool, int64, string, []string) {
+func readinessOutcome(events []flatEvent, startIndex int, origin flatEvent, observation Observation, sourceIDs []string) (bool, int64, string, []string) {
 	for _, candidate := range events[startIndex:] {
+		if !sameServerSession(origin, candidate) {
+			break
+		}
 		if candidate.event.ServerTimeMS > observation.ClosedMS {
 			break
 		}
@@ -304,10 +318,13 @@ func readinessOutcome(events []flatEvent, startIndex int, observation Observatio
 	return false, 0, "", sourceIDs
 }
 
-func cueClass(events []flatEvent, currentIndex int, observerSessionID, targetID string, atMS int64) (string, *CueFact) {
+func cueClass(events []flatEvent, currentIndex int, origin flatEvent, observerSessionID, targetID string, atMS int64) (string, *CueFact) {
 	const cueLookbackMS = int64(30_000)
 	for index := currentIndex - 1; index >= 0; index-- {
 		event := events[index]
+		if !sameServerSession(origin, event) {
+			break
+		}
 		if atMS-event.event.ServerTimeMS > cueLookbackMS {
 			break
 		}
@@ -356,6 +373,21 @@ func assignIndependence(observations []Observation, config Config) {
 			lastFeatureByObserver[observation.ObserverPlayerSessionID] = observation.StartedMS
 		}
 	}
+}
+
+func sameServerSession(left, right flatEvent) bool {
+	return left.batch.ServerID == right.batch.ServerID && left.batch.ServerSessionID == right.batch.ServerSessionID
+}
+
+func validatedFirstPersonOrigin(value string) bool {
+	return value == "VALIDATED_FIRST_PERSON_HEAD" || value == "FIRST_PERSON_EYE"
+}
+
+func targetIdentityKey(targetID, targetSessionID string) string {
+	if targetID != "" {
+		return stableID("target-identity", targetID)
+	}
+	return stableID("target-session", targetSessionID)
 }
 
 func stableID(parts ...string) string {
