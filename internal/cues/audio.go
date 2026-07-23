@@ -243,10 +243,10 @@ func nearestPosition(samples []positionSample, atMS, toleranceMS int64) ([3]floa
 	var best [3]float64
 	bestDelta := toleranceMS + 1
 	for _, sample := range samples {
-		delta := sample.timeMS - atMS
-		if delta < 0 {
-			delta = -delta
+		if sample.timeMS > atMS {
+			continue
 		}
+		delta := atMS - sample.timeMS
 		if delta <= toleranceMS && delta < bestDelta {
 			best, bestDelta = sample.position, delta
 		}
