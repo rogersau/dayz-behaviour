@@ -25,8 +25,10 @@ type ScrubStats struct {
 	AffectedBatches []BatchRef
 }
 
-// ScrubRaw removes every event attributable to a durable DayZ identity. A dry
-// run performs the same scan without changing files.
+// ScrubRaw removes every event attributable to a durable DayZ identity. An
+// event is removed when the subject owns it or appears in any durable/session
+// identity role in its payload. A dry run performs the same scan without
+// changing files.
 func ScrubRaw(root, durablePlayerID string, execute bool) (ScrubStats, error) {
 	var stats ScrubStats
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(durablePlayerID) == "" {
@@ -102,10 +104,8 @@ func containsIdentity(value any, identity string) bool {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			if strings.HasSuffix(key, "player_id") {
-				if text, ok := child.(string); ok && text == identity {
-					return true
-				}
+			if text, ok := child.(string); ok && identityFieldMatches(key, text, identity) {
+				return true
 			}
 			if containsIdentity(child, identity) {
 				return true
@@ -117,6 +117,17 @@ func containsIdentity(value any, identity string) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+func identityFieldMatches(key, value, identity string) bool {
+	lower := strings.ToLower(key)
+	if strings.HasSuffix(lower, "player_session_id") || strings.HasSuffix(lower, "session_id") {
+		return rawDurableID(value) == identity
+	}
+	if strings.HasSuffix(lower, "player_id") || strings.HasSuffix(lower, "durable_player_id") {
+		return value == identity
 	}
 	return false
 }
