@@ -6,7 +6,7 @@ import (
 	"github.com/rogersau/dayz-behaviour/internal/observations"
 )
 
-const ReadinessAlgorithmVersion = "beta-binomial-v1"
+const ReadinessAlgorithmVersion = "beta-binomial-v2"
 
 type ReadinessResult struct {
 	PlayerSessionID           string  `json:"player_session_id"`
@@ -61,7 +61,11 @@ func EstimateReadinessForSessions(playerID string, playerSessionIDs []string, in
 		}
 		sessions[observation.ObserverPlayerSessionID] = struct{}{}
 		encounters[observation.EncounterID] = struct{}{}
-		targets[observation.TargetPlayerSessionID] = struct{}{}
+		targetKey := observation.TargetIdentityKey
+		if targetKey == "" {
+			targetKey = observation.TargetPlayerSessionID
+		}
+		targets[targetKey] = struct{}{}
 	}
 	hiddenMean, hiddenVariance := betaMoments(priorAlpha+float64(result.HiddenSuccesses), priorBeta+float64(result.HiddenTrials-result.HiddenSuccesses))
 	controlMean, controlVariance := betaMoments(priorAlpha+float64(result.ControlSuccesses), priorBeta+float64(result.ControlTrials-result.ControlSuccesses))
