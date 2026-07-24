@@ -37,9 +37,9 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 |---|---|
 | `dayz/BehaviourProbe` | Client/server DayZ mod that captures bounded telemetry, gunshot/movement audio opportunities, and visibility observations |
 | `cmd/ingestd` | Authenticated loopback receiver and DayZ spool importer |
-| `cmd/normalize` | Converts immutable raw batches into PostgreSQL records using direct DayZ/Steam identities |
+| `cmd/normalize` | One-shot/manual raw-to-PostgreSQL replay and recovery tool |
 | `cmd/analyse` | Builds observations, audio cue facts, matched controls, feature estimates, and review tiers |
-| `cmd/reviewd` | Steam-authenticated evidence browser and review API |
+| `cmd/reviewd` | Continuous normalization, Steam-authenticated evidence browser, and review API |
 | `cmd/retention` | Dry-run-first raw, normalized, and review retention |
 | `cmd/privacy-delete` | Audited deletion of one durable player identity |
 
@@ -91,8 +91,10 @@ go vet ./...
 Copy `.env.example` to `.env`, replace every placeholder, then run:
 
 ```powershell
-docker compose --env-file .env -f deploy/compose.yaml up --build postgres ingestd normalize reviewd
+docker compose --env-file .env -f deploy/compose.yaml up --build --remove-orphans postgres ingestd reviewd
 ```
+
+This starts three long-running containers: PostgreSQL, the database-independent ingest receiver, and `reviewd`. The `reviewd` process continuously normalizes the read-only raw telemetry volume while serving the explorer and review API. Analysis and retention remain on-demand tool-profile jobs, and `cmd/normalize` remains available for one-shot recovery or manual replay.
 
 The services bind to loopback by default:
 
