@@ -1,6 +1,6 @@
 # Deployment
 
-This guide describes the supported local/sidecar topology. The DayZ collector exports to a receiver beside the dedicated server, while PostgreSQL and the review service may run on the same host or a protected internal network.
+This guide describes the supported local/sidecar topology. The DayZ collector exports to a receiver beside the dedicated server, while PostgreSQL and the review service may run on the same host or a protected internal network. The standard stack uses three long-running containers; `reviewd` also runs the continuous normalizer.
 
 ## Prerequisites
 
@@ -15,22 +15,20 @@ This guide describes the supported local/sidecar topology. The DayZ collector ex
 
 ```text
 DayZ dedicated server
-    │
-    ├─ DayZBehaviourProbe server scripts
-    ├─ loopback HTTP ───────────────> ingestd :8080
-    └─ failed-export spool               │
-                                         ▼
-                                  immutable raw volume
-                                         │
-                         normalize ───────┴─────── analyse
-                              │                       │
-                              └────── PostgreSQL ─────┘
-                                          │
-                                       reviewd :8082
-                                          │
-                                   HTTPS reverse proxy
-                                          │
-                                      administrators
+    ├─ loopback HTTP ───────────────┐
+    └─ failed-export spool ─────────┴─> ingestd :8080
+                                             │
+                                             ▼
+                                      immutable raw volume
+                                         │           │
+                               read-only │           └─> analyse (on demand)
+                                         ▼                         │
+                                  ┌───────────────┐                │
+administrators ─> HTTPS proxy ──> │ reviewd :8082 │                │
+                                  │ - normalizer  │                │
+                                  │ - admin API/UI │                │
+                                  └───────┬───────┘                │
+                                          └──────────> PostgreSQL <─┘
 ```
 
 The supplied Compose file publishes `ingestd` and PostgreSQL only on `127.0.0.1`. Keep them private. Only reverse-proxied `reviewd` should be reachable remotely.
@@ -49,6 +47,8 @@ Replace every placeholder.
 |---|---|---|
 | `DBA_POSTGRES_PASSWORD` | PostgreSQL/Compose | Database password |
 | `DBA_QUERY_TOKEN` | DayZ mod and `ingestd` | Loopback ingest credential |
+| `DBA_RAW_DIR` | `ingestd`, `reviewd` | Immutable raw batch root for direct runs; Compose supplies `/data/raw` |
+| `DBA_NORMALIZE_INTERVAL` | `reviewd` | Continuous normalization interval; defaults to `5s` |
 | `DBA_REVIEW_TOKEN` | `reviewd` | Bearer token for API clients |
 | `DBA_PUBLIC_BASE_URL` | `reviewd` | Exact externally visible origin |
 | `DBA_STEAM_ADMIN_IDS` | `reviewd` | Comma-separated SteamID64 allowlist |
@@ -60,19 +60,22 @@ Generate independent random values for credentials. The application stores direc
 ## Start the standard stack
 
 ```powershell
-docker compose --env-file .env -f deploy/compose.yaml up --build postgres ingestd normalize reviewd
+docker compose --env-file .env -f deploy/compose.yaml up --build --remove-orphans postgres ingestd reviewd
 ```
 
 | Service | Default address | Role |
 |---|---|---|
 | `postgres` | `127.0.0.1:5432` | Normalized, analysis, and review data |
-| `ingestd` | `127.0.0.1:8080` | Telemetry receiver and spool importer |
-| `normalize` | internal | Continuous raw-to-PostgreSQL normalization |
-| `reviewd` | `127.0.0.1:8082` | Explorer and review API |
+| `ingestd` | `127.0.0.1:8080` | Database-independent telemetry receiver and spool importer |
+| `reviewd` | `127.0.0.1:8082` | Continuous normalization, explorer, and review API |
+
+The `reviewd` container mounts `telemetry-data` read-only and scans it immediately at startup and then at `DBA_NORMALIZE_INTERVAL`. The standalone `cmd/normalize` binary remains available for one-shot recovery or manual replay; it is no longer a continuously running Compose service.
+
+`--remove-orphans` removes the former standalone `normalize` container when upgrading an existing deployment. Confirm that only `postgres`, `ingestd`, and `reviewd` remain running after the update.
 
 Named volumes persist through ordinary restarts:
 
-- `telemetry-data` — raw batches and spool import area;
+- `telemetry-data` — raw batches and spool import area; mounted read-only by `reviewd`;
 - `postgres-data` — PostgreSQL cluster.
 
 Do not run `docker compose down -v` unless both datasets should be erased.
@@ -208,7 +211,7 @@ After clients connect:
 
 1. confirm `ingestd` accepts batches;
 2. confirm raw JSON appears under the expected server/session path;
-3. confirm `normalize` processes new batches;
+3. confirm the `reviewd` normalizer processes new batches;
 4. confirm direct player and session IDs appear in the explorer;
 5. inspect lifecycle, snapshot, client-context, and health events;
 6. fire suppressed and unsuppressed weapons and inspect shot context;
