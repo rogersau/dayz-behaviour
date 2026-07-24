@@ -35,13 +35,12 @@ The system does not identify cheat software, recreate a player’s screen or aud
                                                 │
                          ┌──────────────────────┴───────────────────┐
                          ▼                                          ▼
-                     normalize                                  analyse
+                 reviewd container                         analyse (on demand)
+          continuous normalizer + API/UI                           │
                          │                                          │
-                  PostgreSQL records                      observations/features
                          └──────────────────────┬───────────────────┘
                                                 ▼
-                                            reviewd
-                                      API + admin explorer
+                                            PostgreSQL
 ```
 
 ## Components
@@ -84,9 +83,9 @@ It performs only bounded current-world work. It does not scan every player pair 
 
 The DayZ query token is intended for a loopback or private sidecar boundary, not direct internet exposure.
 
-### `normalize`
+### Normalization
 
-`normalize` replays raw batches into PostgreSQL. It stores direct player and session identifiers exactly as collected, along with:
+The standard Compose deployment runs continuous normalization inside `reviewd`. It reads the immutable raw volume and stores direct player and session identifiers exactly as collected, along with:
 
 - normalized events;
 - player sessions;
@@ -94,7 +93,7 @@ The DayZ query token is intended for a loopback or private sidecar boundary, not
 - visibility probe results;
 - source authority and schema versions.
 
-Normalization is idempotent. Raw files remain the source of truth.
+Normalization remains a separate logical stage and is idempotent. Raw files remain the source of truth, and a database or normalizer failure cannot prevent `ingestd` from accepting and durably storing new batches. The standalone `cmd/normalize` command remains available for one-shot recovery, manual replay, and direct development.
 
 ### `analyse`
 
@@ -104,7 +103,7 @@ The primary feature compares reactions during validated concealed-target opportu
 
 ### `reviewd`
 
-`reviewd` exposes:
+`reviewd` runs the continuous normalizer when `DBA_RAW_DIR` is configured and exposes:
 
 - a Steam-authenticated browser explorer;
 - bearer-authenticated review APIs;
@@ -112,6 +111,8 @@ The primary feature compares reactions during validated concealed-target opportu
 - ordered timelines with authority and payload context;
 - local DayZ maps and spatial evidence;
 - review cases and audited dispositions.
+
+In Compose, the telemetry volume is mounted read-only into `reviewd`. This reduces the deployment to three long-running containers while preserving immutable raw storage and replay. It also places raw-data read access inside the remotely reachable administrative service, so `reviewd` must remain behind the same restricted HTTPS/admin boundary as the rest of the sensitive evidence system.
 
 It is read-only with respect to DayZ. It cannot ban, kick, message, or otherwise alter a player in game.
 
