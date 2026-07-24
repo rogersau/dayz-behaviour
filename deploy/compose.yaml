@@ -45,27 +45,16 @@ services:
       DBA_SESSION_SECRET: ${DBA_SESSION_SECRET:?set a random secret of at least 32 characters}
       DBA_MAP_DIR: /app/maps
       DBA_DEFAULT_MAP: ${DBA_DEFAULT_MAP:-chernarusplus}
+      DBA_RAW_DIR: /data/raw
+      DBA_NORMALIZE_INTERVAL: ${DBA_NORMALIZE_INTERVAL:-5s}
       DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "127.0.0.1:8082:8082"
-    restart: unless-stopped
-
-  normalize:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    entrypoint: ["/app/normalize"]
-    command: ["-raw-dir", "/data/raw", "-watch-interval", "5s"]
-    environment:
-      DBA_DATABASE_URL: postgres://dayz_behaviour:${DBA_POSTGRES_PASSWORD}@postgres:5432/dayz_behaviour?sslmode=disable
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes:
-      - telemetry-data:/data
+      - telemetry-data:/data:ro
     restart: unless-stopped
 
   analyse:
