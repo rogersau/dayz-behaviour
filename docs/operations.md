@@ -6,7 +6,7 @@ This guide covers day-to-day operation after the stack and DayZ mod are deployed
 
 - Keep `ingestd` and PostgreSQL on loopback or a private service network.
 - Use the DayZ query token only across the server-host sidecar boundary.
-- Expose only `reviewd` to administrators, through HTTPS.
+- Expose only `reviewd` to administrators, through HTTPS. The standard Compose deployment gives it read-only access to raw telemetry for continuous normalization.
 - Restrict raw telemetry, DayZ profiles, environment files, database backups, spool files, API output, and screenshots.
 - No service sends enforcement commands to DayZ.
 
@@ -15,9 +15,9 @@ This guide covers day-to-day operation after the stack and DayZ mod are deployed
 | Service/tool | Responsibility |
 |---|---|
 | `ingestd` | Authenticate, validate, and store raw batches; import spool files |
-| `normalize` | Convert raw batches into PostgreSQL records |
+| `reviewd` | Continuously normalize raw batches, serve evidence, and record dispositions |
+| `normalize` | Run one-shot/manual normalization for recovery or direct development |
 | `analyse` | Produce features and review rankings |
-| `reviewd` | Serve evidence and record dispositions |
 | `retention` | Report or enforce raw, normalized, and review retention |
 | `privacy-delete` | Report or delete all references to one direct player ID |
 
@@ -27,7 +27,7 @@ After a restart or during routine operation, check:
 
 - collector health events continue arriving;
 - raw batch files are increasing under the expected server/session path;
-- `normalize` processes new batches;
+- the `reviewd` normalizer processes new batches;
 - `ingestd` has no repeated authentication, validation, conflict, or storage failures;
 - queues and spool files remain bounded;
 - dropped-event and dropped-opportunity counters are understood;
@@ -104,7 +104,7 @@ Recovery procedure:
 2. confirm the spool directory is mounted or copied to the importer path;
 3. watch logs for imported files, batches, and duplicates;
 4. confirm recovered raw files exist;
-5. confirm `normalize` processes them;
+5. confirm the `reviewd` normalizer processes them;
 6. retain malformed spool files for investigation.
 
 A rising spool-overwrite count means data was lost after the bounded spool filled. Record the period and treat analysis coverage as incomplete.
@@ -359,7 +359,7 @@ Check mod loading, `enabled`, endpoint trailing `/`, token match, `ingestd` list
 
 ### Raw files but empty explorer
 
-Check `normalize`, PostgreSQL connectivity, migrations, normalizer logs, and that `reviewd` uses the same database.
+Check `reviewd` normalizer logs, its read-only `telemetry-data` mount, PostgreSQL connectivity, and migrations. For recovery, run `cmd/normalize` once against the same raw directory and database.
 
 ### Steam login loop
 
