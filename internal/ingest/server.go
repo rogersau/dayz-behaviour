@@ -23,12 +23,22 @@ type BatchStore interface {
 }
 
 type Config struct {
-	BearerToken     string
-	QueryToken      string
-	MaxRequestBytes int64
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
+	BearerToken       string
+	QueryToken        string
+	MaxRequestBytes   int64
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	ServerCredentials map[string]string
+	ExpectedServerID  string
+}
+
+func LocalQueryConfig(queryValue, expectedServerID string, maxRequestBytes int64) Config {
+	return Config{
+		QueryToken:       queryValue,
+		MaxRequestBytes:  maxRequestBytes,
+		ExpectedServerID: expectedServerID,
+	}
 }
 
 type Server struct {
@@ -104,10 +114,15 @@ func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
 	started := time.Now()
 	defer func() { s.requestMicroseconds.Add(uint64(time.Since(started).Microseconds())) }()
 	s.requests.Add(1)
-	if !s.authorised(request.Header.Get("Authorization"), request.URL.Query().Get("token")) {
+	boundServerID, authorised := s.authorised(
+		request.Header.Get("Authorization"),
+		request.URL.Query().Get("token"),
+		request.Header.Get("X-DayZ-Server-ID"),
+	)
+	if !authorised {
 		s.rejected.Add(1)
 		s.authFailures.Add(1)
-		writeError(w, http.StatusUnauthorized, "unauthorised", "valid ingest token required")
+		writeError(w, http.StatusUnauthorized, "unauthorised", "valid ingest credential required")
 		return
 	}
 
@@ -149,6 +164,17 @@ func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
 		writeError(w, status, code, err.Error())
 		return
 	}
+	if s.config.ExpectedServerID != "" && batch.ServerID != s.config.ExpectedServerID {
+		s.rejected.Add(1)
+		writeError(w, http.StatusForbidden, "server_id_mismatch", "batch server_id does not match this receiver")
+		return
+	}
+	if boundServerID != "" && batch.ServerID != boundServerID {
+		s.rejected.Add(1)
+		s.authFailures.Add(1)
+		writeError(w, http.StatusForbidden, "server_id_mismatch", "credential is not authorised for this server_id")
+		return
+	}
 
 	storageStarted := time.Now()
 	err := s.store.Put(batch)
@@ -165,6 +191,12 @@ func (s *Server) handleBatch(w http.ResponseWriter, request *http.Request) {
 		if errors.Is(err, storage.ErrBatchConflict) {
 			s.rejected.Add(1)
 			writeError(w, http.StatusConflict, "batch_conflict", "batch identity already exists with different content")
+			return
+		}
+		if errors.Is(err, storage.ErrCapacityExceeded) {
+			s.storageFailures.Add(1)
+			w.Header().Set("Retry-After", "5")
+			writeError(w, http.StatusServiceUnavailable, "storage_capacity_exceeded", "durable telemetry storage is at capacity")
 			return
 		}
 		s.storageFailures.Add(1)
@@ -217,20 +249,30 @@ func (r *countingReader) Read(buffer []byte) (int, error) {
 	return count, err
 }
 
-func (s *Server) authorised(header, queryToken string) bool {
-	if s.config.BearerToken == "" && s.config.QueryToken == "" {
-		return true
-	}
-	if s.config.BearerToken != "" {
-		const prefix = "Bearer "
-		if strings.HasPrefix(header, prefix) {
-			provided := strings.TrimPrefix(header, prefix)
-			if secureEqual(provided, s.config.BearerToken) {
-				return true
-			}
+func (s *Server) authorised(header, queryCredential, claimedServerID string) (string, bool) {
+	providedBearer := bearerCredential(header)
+	if claimedServerID != "" && len(s.config.ServerCredentials) > 0 {
+		expected, ok := s.config.ServerCredentials[claimedServerID]
+		if !ok || providedBearer == "" || !secureEqual(providedBearer, expected) {
+			return "", false
 		}
+		return claimedServerID, true
 	}
-	return s.config.QueryToken != "" && secureEqual(queryToken, s.config.QueryToken)
+	if s.config.BearerToken == "" && s.config.QueryToken == "" {
+		return "", len(s.config.ServerCredentials) == 0
+	}
+	if s.config.BearerToken != "" && providedBearer != "" && secureEqual(providedBearer, s.config.BearerToken) {
+		return "", true
+	}
+	return "", s.config.QueryToken != "" && secureEqual(queryCredential, s.config.QueryToken)
+}
+
+func bearerCredential(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(header, prefix)
 }
 
 func secureEqual(provided, expected string) bool {

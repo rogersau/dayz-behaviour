@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrAlreadyStored = errors.New("telemetry batch already stored")
-	ErrBatchConflict = errors.New("telemetry batch id conflicts with different content")
-	safePathPart     = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+	ErrAlreadyStored    = errors.New("telemetry batch already stored")
+	ErrBatchConflict    = errors.New("telemetry batch id conflicts with different content")
+	ErrCapacityExceeded = errors.New("telemetry storage capacity exceeded")
+	safePathPart        = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 )
 
 // RawStore persists each batch as a separate immutable JSON file. This is

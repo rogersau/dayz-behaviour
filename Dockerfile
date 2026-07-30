@@ -1,16 +1,18 @@
-FROM golang:1.23-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ingestd ./cmd/ingestd \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/normalize ./cmd/normalize \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/replay ./cmd/replay \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/analyse ./cmd/analyse \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reviewd ./cmd/reviewd \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/privacy-delete ./cmd/privacy-delete \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/retention ./cmd/retention \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/ingestd ./cmd/ingestd \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/normalize ./cmd/normalize \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/replay ./cmd/replay \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/analyse ./cmd/analyse \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/reviewd ./cmd/reviewd \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/privacy-delete ./cmd/privacy-delete \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/retention ./cmd/retention \
  && mkdir -p /out-data/raw /out-data/dayz-spool \
  && chmod 0750 /out-data /out-data/raw /out-data/dayz-spool
 

@@ -7,6 +7,11 @@
 # Go
 bin/
 coverage.out
+*.exe
+
+# Local agent and central authentication configuration
+dayz-behaviour-agent.json
+server-auth.json
 
 # Local telemetry and databases
 .env

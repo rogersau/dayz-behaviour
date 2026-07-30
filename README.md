@@ -36,7 +36,8 @@ Read [Architecture](docs/architecture.md) for the complete data flow and trust m
 | Component | Purpose |
 |---|---|
 | `dayz/BehaviourProbe` | Client/server DayZ mod that captures bounded telemetry, gunshot/movement audio opportunities, and visibility observations |
-| `cmd/ingestd` | Authenticated loopback receiver and DayZ spool importer |
+| `cmd/agentd` | Standalone Windows server agent with durable local queuing and HTTPS forwarding |
+| `cmd/ingestd` | Authenticated central or loopback receiver and DayZ spool importer |
 | `cmd/normalize` | Converts immutable raw batches into PostgreSQL records using direct DayZ/Steam identities |
 | `cmd/analyse` | Builds observations, audio cue facts, matched controls, feature estimates, and review tiers |
 | `cmd/reviewd` | Steam-authenticated evidence browser and review API |
@@ -120,6 +121,8 @@ Set at least:
 }
 ```
 
+For a DayZ server outside the central host, install the standalone Windows agent and keep the DayZ endpoint on loopback. See [DayZ server agent](docs/server-agent.md) for durable forwarding to a home-hosted central stack through Cloudflare Tunnel.
+
 Audio opportunity capture is enabled by default. Visibility probing is disabled by default. Do not enable strong hidden-target evidence until the server is first-person-only and its visibility policy has passed a controlled validation fixture.
 
 See [Deployment](docs/deployment.md) for the full setup, environment variables, network topology, audio validation, and first-run checklist.
@@ -155,6 +158,7 @@ See [Operations, security, and privacy](docs/operations.md) for backups, spool r
 - [Architecture](docs/architecture.md)
 - [Analysis and review](docs/analysis-and-review.md)
 - [Deployment](docs/deployment.md)
+- [DayZ server agent](docs/server-agent.md)
 - [Operations, security, and privacy](docs/operations.md)
 
 ## Current maturity

@@ -1,0 +1,53 @@
+name: Windows Agent
+
+on:
+  pull_request:
+    paths:
+      - "cmd/agentd/**"
+      - "internal/agent/**"
+      - "internal/agentservice/**"
+      - "internal/ingest/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/agent-windows.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cmd/agentd/**"
+      - "internal/agent/**"
+      - "internal/agentservice/**"
+      - "internal/ingest/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/agent-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test agent and ingest packages
+        run: go test -race ./internal/agent ./internal/ingest
+      - name: Build standalone Windows executable
+        run: |
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o dist/dayz-behaviour-agent-windows-amd64.exe \
+            ./cmd/agentd
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: dayz-behaviour-agent-windows-amd64
+          path: dist/dayz-behaviour-agent-windows-amd64.exe
+          if-no-files-found: error
+          retention-days: 14
