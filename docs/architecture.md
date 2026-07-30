@@ -277,10 +277,11 @@ Transport, sampling, visibility, observation, cue, feature, matching, and rankin
 
 The system fails conservatively:
 
-- network failure spools export batches to disk;
-- queues and spool files are bounded and measured;
+- the agent durably queues accepted batches during central or internet outages;
+- the DayZ mod uses its bounded emergency spool when the local agent is unavailable;
+- agent queues, dead letters, and DayZ spool files are bounded and measured;
 - stale observer/target entities are revalidated before probes;
-- malformed, unauthorized, conflicting, or impossible batches are rejected;
+- malformed, unauthorized, conflicting, oversized, or impossible batches are rejected;
 - missing maps are not substituted with another terrain;
 - missing telemetry or failed validation gates suppresses review tiers;
 - no failure mode creates automatic enforcement.

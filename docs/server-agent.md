@@ -1,8 +1,10 @@
 # DayZ server agent
 
-The DayZ Behaviour server agent is a single executable installed beside a DayZ dedicated server. It receives telemetry from the DayZ mod over loopback, stores every accepted batch in a durable local outbox, and forwards the original batch to the central ingest service over HTTPS.
+The DayZ Behaviour server agent is a single executable installed beside a DayZ dedicated server. It receives telemetry from the DayZ mod over loopback, stores every accepted batch in a durable local outbox, and forwards the original batch to central `ingestd` over HTTPS.
 
 The agent does not require Docker, Go, PostgreSQL, or another runtime on the DayZ server.
+
+Use the same release version for the agent and central images for the initial protocol. See [Releases and published images](releases.md) for downloads, checksums, image tags, upgrades, and rollback.
 
 ## Home-hosted topology
 
@@ -28,6 +30,34 @@ central ingestd → raw storage → normalize/analyse → PostgreSQL/reviewd
 ```
 
 Cloudflare Tunnel is only the route into the home network. The Go services, raw telemetry, PostgreSQL, analysis, and review interface remain on the home server.
+
+## Download and verify
+
+Download the Windows AMD64 ZIP and checksum file from the matching GitHub Release. GitHub CLI can fetch both:
+
+```powershell
+gh release download v0.1.0 `
+  --repo rogersau/dayz-behaviour `
+  --pattern "dayz-behaviour-agent_0.1.0_windows_amd64.zip" `
+  --pattern "dayz-behaviour-agent_0.1.0_windows_amd64_SHA256SUMS.txt"
+```
+
+Verify the ZIP before extracting it:
+
+```powershell
+$expected = (Get-Content .\dayz-behaviour-agent_0.1.0_windows_amd64_SHA256SUMS.txt |
+  Where-Object { $_ -match "\.zip$" }).Split()[0]
+$actual = (Get-FileHash .\dayz-behaviour-agent_0.1.0_windows_amd64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected.ToLowerInvariant()) { throw "Checksum mismatch" }
+```
+
+After extraction:
+
+```powershell
+.\dayz-behaviour-agent.exe version
+```
+
+The output should match the release version without the leading `v`.
 
 ## Agent commands
 
@@ -62,7 +92,7 @@ The `init` command creates a separate random credential for the loopback DayZ-to
 }
 ```
 
-The mod and agent `server_id` values must match.
+The mod, agent, and central credential-map `server_id` values must match.
 
 ## Agent configuration
 
@@ -86,9 +116,15 @@ A generated configuration contains:
 }
 ```
 
-Relative paths are resolved from the configuration-file directory. The listener is required to remain on loopback. Remote upstream URLs are required to use HTTPS. Restrict access to the agent folder because its configuration contains credentials and its outbox contains directly attributable telemetry.
+Relative paths are resolved from the configuration-file directory. The listener is required to remain on loopback. Remote upstream URLs are required to use HTTPS.
 
-The local credential and upstream credential may be supplied at runtime with `DBA_AGENT_LOCAL_TOKEN` and `DBA_AGENT_UPSTREAM_TOKEN`. Environment values override the JSON fields.
+Restrict access to the agent folder because:
+
+- the configuration contains credentials;
+- the outbox and dead-letter directories contain directly attributable telemetry;
+- the DayZ spool contains the same raw batches when local delivery fails.
+
+The local and upstream credentials may be supplied at runtime with `DBA_AGENT_LOCAL_TOKEN` and `DBA_AGENT_UPSTREAM_TOKEN`. Environment values override the JSON fields.
 
 ## Delivery behaviour
 
@@ -109,15 +145,27 @@ GET http://127.0.0.1:8080/agent/status
 GET http://127.0.0.1:8080/agent/metrics
 ```
 
+Routine checks should confirm:
+
+- `version` matches the intended release;
+- service state is `running`;
+- status is `ok`, or any degraded reason is understood;
+- queue batches and bytes return towards zero after an outage;
+- `last_success_at` advances;
+- upload failures are not continuously increasing;
+- dead letters remain zero unless a rejection is under investigation.
+
 ## Configure central server authentication
 
-Central `ingestd` can load a JSON map that binds one credential to one DayZ `server_id`:
+Central `ingestd` loads a JSON map that binds one credential to one DayZ `server_id`.
+
+Generate a separate credential for each server:
 
 ```powershell
 .\dayz-behaviour-agent.exe generate-credential
 ```
 
-Generate a separate value for each server. Put the value in the central map and provide the same value to that server operator for the interactive `init` prompt.
+Put the value in the central map and provide the same value to that server operator for the interactive `init` prompt:
 
 ```json
 {
@@ -126,30 +174,42 @@ Generate a separate value for each server. Put the value in the central map and 
 }
 ```
 
-Set `DBA_SERVER_AUTH_FILE` to the mounted path of this file. The agent sends its claimed server ID in `X-DayZ-Server-ID`; central ingest rejects a credential used for a different `server_id`. `ingestd` reads the map at startup, so restart that service after adding, rotating, or revoking a server credential; agents safely queue during the restart.
+Set `DBA_SERVER_AUTH_FILE` to the mounted container path. The agent sends its claimed server ID in `X-DayZ-Server-ID`; central ingest rejects a credential used for a different `server_id`.
 
-Existing single-token local deployments remain supported through `DBA_QUERY_TOKEN` or `DBA_BEARER_TOKEN`.
+`ingestd` reads the map at startup. Restart it after adding, rotating, or revoking a server credential. Agents safely queue during the restart.
 
-## Run the central stack at home with Cloudflare Tunnel
+Existing single-token same-host deployments remain supported through `DBA_QUERY_TOKEN` or `DBA_BEARER_TOKEN`. Do not use the DayZ query token across the internet.
 
-Copy `deploy/server-auth.example.json` to a protected path outside the repository and replace the placeholders. Set:
+## Run the central stack at home
+
+Copy `deploy/server-auth.example.json` to a protected path outside the repository and replace the placeholders. Configure:
 
 ```text
 DBA_SERVER_AUTH_HOST_FILE=<absolute host path to server-auth.json>
 DBA_CLOUDFLARE_TUNNEL_TOKEN=<Cloudflare tunnel token>
+DBA_CORE_IMAGE=ghcr.io/rogersau/dayz-behaviour:0.1.0
+DBA_REVIEW_IMAGE=ghcr.io/rogersau/dayz-behaviour-review:0.1.0
 ```
 
-Start the home stack with the base Compose file and the home-hosted override:
+Pull and start the pinned release images:
 
 ```powershell
 docker compose `
   --env-file .env `
   -f deploy/compose.yaml `
+  -f deploy/compose.release.yaml `
   -f deploy/compose.home.yaml `
-  up --build postgres ingestd normalize reviewd cloudflared
+  pull
+
+docker compose `
+  --env-file .env `
+  -f deploy/compose.yaml `
+  -f deploy/compose.release.yaml `
+  -f deploy/compose.home.yaml `
+  up -d --no-build postgres ingestd normalize reviewd cloudflared
 ```
 
-In the Cloudflare Tunnel configuration, publish:
+In the Cloudflare Tunnel configuration, publish only:
 
 ```text
 ingest.example.com + path ^/v1/telemetry/batches$ → http://ingestd:8080
@@ -157,13 +217,28 @@ review.example.com                              → http://reviewd:8082
 catch-all                                      → HTTP 404
 ```
 
-Apply Cloudflare Access to the review hostname. The ingest route is authenticated by the server-specific application credentials. Its path rule prevents the public hostname from exposing `healthz`, `readyz`, or metrics.
+Apply Cloudflare Access or an equivalent control to the review hostname. The ingest route is authenticated by the server-specific application credentials. Its path rule prevents the public hostname from exposing `healthz`, `readyz`, or metrics.
 
 No inbound home-router port forwarding is required. `ingestd`, PostgreSQL, and `reviewd` remain bound to loopback on the Docker host; `cloudflared` reaches them through the private Compose network.
 
-## Build the Windows executable
+## Upgrade and rollback
 
-From a machine with the Go version declared in `go.mod`:
+Update central services before agents. Agents queue during a brief central restart.
+
+For each upgrade:
+
+1. back up central raw telemetry, PostgreSQL, configurations, and the server credential map;
+2. pin and deploy the new central and review images;
+3. verify ingest, normalization, login, timelines, and maps;
+4. update one agent and confirm its queue drains;
+5. continue server by server;
+6. retain the previous ZIP and image tags until validation is complete.
+
+Do not roll back across a destructive database migration without restoring a compatible backup. See [Releases and published images](releases.md) for the full procedure.
+
+## Build from source
+
+For development, build the Windows executable with the Go version declared in `go.mod`:
 
 ```powershell
 $env:GOOS = "windows"
@@ -172,38 +247,10 @@ $env:CGO_ENABLED = "0"
 go build -trimpath -ldflags="-s -w" -o dayz-behaviour-agent.exe ./cmd/agentd
 ```
 
-The output is a standalone Windows executable.
+An ordinary source build reports version `dev`; release builds embed the SemVer tag.
 
-## Publish a GitHub Release
+## Publish a release
 
-The `Release Windows Agent` workflow publishes releases from SemVer tags. Create and push a tag after the release commit is on the intended branch:
+The `Release Agent and Docker Images` workflow publishes the Windows artifacts and GHCR images from a SemVer tag. The release commit must already be merged into `main` before the tag is pushed.
 
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The workflow:
-
-- runs the full Go test suite with the race detector and runs `go vet`;
-- embeds `0.1.0` from the tag into the agent's `version` command;
-- builds the standalone Windows AMD64 executable;
-- publishes the executable, a ZIP package containing the documentation and notices, and SHA-256 checksums;
-- publishes signed-provenance and SBOM-enabled container images to GitHub Container Registry;
-- creates generated GitHub release notes;
-- marks tags such as `v0.2.0-rc.1` as prereleases.
-
-Published images for `v0.1.0` are:
-
-```text
-ghcr.io/rogersau/dayz-behaviour:0.1.0
-ghcr.io/rogersau/dayz-behaviour-review:0.1.0
-```
-
-The core image contains `ingestd`, `normalize`, `analyse`, `retention`, `privacy-delete`, `replay`, and `reviewd`, and is published for Linux AMD64 and ARM64. The review image adds the bundled supported map assets and is Linux AMD64 because its pinned map source is AMD64-only.
-
-Stable releases also update the minor tag, such as `0.1`, and `latest`. Prereleases publish only their exact version, such as `0.2.0-rc.1`, and do not replace `latest`.
-
-After the first publication, check each package's GitHub visibility setting. Public GHCR packages can be pulled anonymously; private packages require registry authentication.
-
-The workflow may also be run manually for an existing tag. Rerunning it replaces the downloadable release assets and republishes the versioned container images without creating a duplicate GitHub Release.
+See [Releases and published images](releases.md) for the tag command, asset list, container tags, prerelease behaviour, and manual republishing.

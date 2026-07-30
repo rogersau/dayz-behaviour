@@ -25,7 +25,7 @@ A single incident is not treated as proof. The system requires repeated, indepen
 
 ![System architecture from DayZ collection to human review](docs/images/system-architecture.svg)
 
-The DayZ server remains the authority for identity, lifecycle, combat, position, movement-audio opportunities, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
+The DayZ server remains the authority for identity, lifecycle, combat, position, movement-audio opportunities, and visibility geometry. Client camera and control-state telemetry is retained as untrusted supporting context. A standalone local agent durably queues telemetry and forwards it over authenticated HTTPS to the central stack, so internet or central outages do not block the DayZ process. Analysis runs outside the game server so collection stays bounded and historical data can be replayed with newer algorithms.
 
 The system does **not** record raw audio. It derives audibility opportunities from authoritative gunshot events and movement context such as speed, stance, surface, footwear, position, distance, and suppressor state.
 
@@ -73,12 +73,20 @@ Read [Analysis and review](docs/analysis-and-review.md) for the statistical mode
 
 ## Quick start
 
+### Choose a deployment path
+
+- **Operators:** use a pinned GitHub Release for the Windows agent and matching pinned GHCR images for the central stack.
+- **Contributors/evaluation:** build the Go services from the checked-out source tree.
+
+See [Releases and published images](docs/releases.md) for download verification, image tags, upgrades, and rollback.
+
 ### Requirements
 
-- Go matching `go.mod`;
-- Docker with Compose;
+- Docker Engine with Compose for the central stack;
 - a DayZ dedicated server and a way to pack/sign the mod for live collection;
-- PostgreSQL 17 when running services outside Compose.
+- Windows AMD64 for the standalone game-server agent;
+- Go matching `go.mod` only when developing or building from source;
+- PostgreSQL 17 only when running the database outside Compose.
 
 ### Run tests
 
@@ -87,9 +95,30 @@ go test ./...
 go vet ./...
 ```
 
-### Start the local data and review stack
+### Start the central stack from a release
 
-Copy `.env.example` to `.env`, replace every placeholder, then run:
+Copy `.env.example` to `.env`, replace every placeholder, then pin both published images to the same release:
+
+```powershell
+$env:DBA_CORE_IMAGE = "ghcr.io/rogersau/dayz-behaviour:0.1.0"
+$env:DBA_REVIEW_IMAGE = "ghcr.io/rogersau/dayz-behaviour-review:0.1.0"
+
+docker compose `
+  --env-file .env `
+  -f deploy/compose.yaml `
+  -f deploy/compose.release.yaml `
+  pull
+
+docker compose `
+  --env-file .env `
+  -f deploy/compose.yaml `
+  -f deploy/compose.release.yaml `
+  up -d --no-build postgres ingestd normalize reviewd
+```
+
+### Build the central stack from source
+
+From a checked-out source tree:
 
 ```powershell
 docker compose --env-file .env -f deploy/compose.yaml up --build postgres ingestd normalize reviewd
@@ -117,7 +146,7 @@ Set at least:
 {
   "server_id": "your-server-name",
   "endpoint": "http://127.0.0.1:8080/",
-  "ingest_token": "the-same-value-as-DBA_QUERY_TOKEN"
+  "ingest_token": [REDACTED_SECRET]
 }
 ```
 
@@ -159,6 +188,7 @@ See [Operations, security, and privacy](docs/operations.md) for backups, spool r
 - [Analysis and review](docs/analysis-and-review.md)
 - [Deployment](docs/deployment.md)
 - [DayZ server agent](docs/server-agent.md)
+- [Releases and published images](docs/releases.md)
 - [Operations, security, and privacy](docs/operations.md)
 
 ## Current maturity

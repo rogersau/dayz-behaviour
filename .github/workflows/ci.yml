@@ -24,9 +24,9 @@ jobs:
         run: |
           gofmt -w ./cmd ./internal ./pkg
           git diff --binary > gofmt.patch
-          changed_go_files="$(git diff --name-only --diff-filter=ACM -- '*.go')"
-          if [ -n "$changed_go_files" ]; then
-            tar -czf gofmt-source.tar.gz $changed_go_files
+          mapfile -t changed_go_files < <(git diff --name-only --diff-filter=ACM -- '*.go')
+          if ((${#changed_go_files[@]})); then
+            tar -czf gofmt-source.tar.gz -- "${changed_go_files[@]}"
           fi
           test ! -s gofmt.patch
       - name: Upload formatting patch
@@ -91,11 +91,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Compose configuration
+      - name: Validate Compose configurations
         env:
-          DBA_POSTGRES_PASSWORD: test-postgres-password
+          DBA_POSTGRES_PASSWORD: "[REDACTED_SECRET]"
           DBA_QUERY_TOKEN: test-ingest-token
           DBA_REVIEW_TOKEN: test-review-token
           DBA_STEAM_ADMIN_IDS: "76561198000000000"
-          DBA_SESSION_SECRET: test-session-secret-at-least-32-characters
-        run: docker compose -f deploy/compose.yaml config --quiet
+          DBA_SESSION_SECRET: "[REDACTED_SECRET]"
+          DBA_CORE_IMAGE: ghcr.io/rogersau/dayz-behaviour:0.1.0
+          DBA_REVIEW_IMAGE: ghcr.io/rogersau/dayz-behaviour-review:0.1.0
+          DBA_SERVER_AUTH_HOST_FILE: ./deploy/server-auth.example.json
+          DBA_CLOUDFLARE_TUNNEL_TOKEN: test-tunnel
+        run: |
+          docker compose -f deploy/compose.yaml config --quiet
+          docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml config --quiet
+          docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml -f deploy/compose.home.yaml config --quiet

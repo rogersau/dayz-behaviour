@@ -1,0 +1,20 @@
+services:
+  ingestd:
+    image: ${DBA_CORE_IMAGE:?set DBA_CORE_IMAGE to an exact release tag}
+    pull_policy: always
+
+  reviewd:
+    image: ${DBA_REVIEW_IMAGE:?set DBA_REVIEW_IMAGE to an exact release tag}
+    pull_policy: always
+
+  normalize:
+    image: ${DBA_CORE_IMAGE:?set DBA_CORE_IMAGE to an exact release tag}
+    pull_policy: always
+
+  analyse:
+    image: ${DBA_CORE_IMAGE:?set DBA_CORE_IMAGE to an exact release tag}
+    pull_policy: always
+
+  retention:
+    image: ${DBA_CORE_IMAGE:?set DBA_CORE_IMAGE to an exact release tag}
+    pull_policy: always
