@@ -1,6 +1,6 @@
 # Deployment
 
-This guide describes the supported local/sidecar topology. The DayZ collector exports to a receiver beside the dedicated server, while PostgreSQL and the review service may run on the same host or a protected internal network.
+This guide describes the same-host evaluation topology. For a DayZ server outside the central host, use the standalone Windows agent described in [DayZ server agent](server-agent.md); it durably forwards telemetry without requiring Docker or PostgreSQL on the game server.
 
 ## Prerequisites
 
@@ -33,7 +33,9 @@ DayZ dedicated server
                                       administrators
 ```
 
-The supplied Compose file publishes `ingestd` and PostgreSQL only on `127.0.0.1`. Keep them private. Only reverse-proxied `reviewd` should be reachable remotely.
+This diagram is the same-host evaluation layout. Remote DayZ servers should send to the standalone agent on their own loopback interface; the agent then forwards to central `ingestd`.
+
+The supplied Compose file publishes `ingestd`, PostgreSQL, and `reviewd` only on `127.0.0.1`. Keep them private. The home-hosted override adds `cloudflared`, which reaches the services through the Compose network without opening an inbound home-router port.
 
 ## Environment variables
 
@@ -49,6 +51,7 @@ Replace every placeholder.
 |---|---|---|
 | `DBA_POSTGRES_PASSWORD` | PostgreSQL/Compose | Database password |
 | `DBA_QUERY_TOKEN` | DayZ mod and `ingestd` | Loopback ingest credential |
+| `DBA_SERVER_AUTH_FILE` | central `ingestd` | JSON map binding one remote agent credential to each `server_id` |
 | `DBA_REVIEW_TOKEN` | `reviewd` | Bearer token for API clients |
 | `DBA_PUBLIC_BASE_URL` | `reviewd` | Exact externally visible origin |
 | `DBA_STEAM_ADMIN_IDS` | `reviewd` | Comma-separated SteamID64 allowlist |

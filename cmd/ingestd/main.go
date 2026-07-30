@@ -18,8 +18,9 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if os.Getenv("DBA_BEARER_TOKEN") == "" && os.Getenv("DBA_QUERY_TOKEN") == "" && os.Getenv("DBA_ALLOW_UNAUTHENTICATED_LOCAL") != "true" {
-		logger.Error("ingest authentication is required; set a token or explicitly enable local development mode")
+	serverAuthFile := os.Getenv("DBA_SERVER_AUTH_FILE")
+	if os.Getenv("DBA_BEARER_TOKEN") == "" && os.Getenv("DBA_QUERY_TOKEN") == "" && serverAuthFile == "" && os.Getenv("DBA_ALLOW_UNAUTHENTICATED_LOCAL") != "true" {
+		logger.Error("ingest authentication is required; configure an auth mechanism or explicitly enable local development mode")
 		os.Exit(1)
 	}
 
@@ -28,11 +29,17 @@ func main() {
 		logger.Error("initialise raw storage", "error", err)
 		os.Exit(1)
 	}
+	serverCredentials, err := loadServerAuthMap(serverAuthFile)
+	if err != nil {
+		logger.Error("load server auth map", "error", err)
+		os.Exit(1)
+	}
 
 	server, err := ingest.NewServer(ingest.Config{
-		BearerToken:     os.Getenv("DBA_BEARER_TOKEN"),
-		QueryToken:      os.Getenv("DBA_QUERY_TOKEN"),
-		MaxRequestBytes: envInt64("DBA_MAX_REQUEST_BYTES", 2*1024*1024),
+		BearerToken:       os.Getenv("DBA_BEARER_TOKEN"),
+		QueryToken:        os.Getenv("DBA_QUERY_TOKEN"),
+		MaxRequestBytes:   envInt64("DBA_MAX_REQUEST_BYTES", 2*1024*1024),
+		ServerCredentials: serverCredentials,
 	}, store, logger)
 	if err != nil {
 		logger.Error("initialise ingest server", "error", err)

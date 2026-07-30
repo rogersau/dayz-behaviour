@@ -22,7 +22,8 @@ services:
     environment:
       DBA_LISTEN_ADDR: 0.0.0.0:8080
       DBA_RAW_DIR: /data/raw
-      DBA_QUERY_TOKEN: ${DBA_QUERY_TOKEN:?set DBA_QUERY_TOKEN}
+      DBA_QUERY_TOKEN: ${DBA_QUERY_TOKEN:-}
+      DBA_SERVER_AUTH_FILE: ${DBA_SERVER_AUTH_FILE:-}
       DBA_MAX_REQUEST_BYTES: 2097152
       DBA_DAYZ_SPOOL_DIR: /data/dayz-spool
     ports:

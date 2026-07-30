@@ -29,7 +29,12 @@ The system does not identify cheat software, recreate a player’s screen or aud
 │                                  asynchronous HTTP export     │
 └───────────────────────────────────────────────┼───────────────┘
                                                 ▼
-                                      ingestd loopback sidecar
+                                local server agent executable
+                                      durable disk outbox
+                                                │
+                                      authenticated HTTPS
+                                                ▼
+                                        central ingestd
                                                 │
                                   immutable raw JSON batches
                                                 │
@@ -43,6 +48,8 @@ The system does not identify cheat software, recreate a player’s screen or aud
                                             reviewd
                                       API + admin explorer
 ```
+
+A same-host evaluation deployment may still send the DayZ exporter directly to `ingestd`. Distributed deployments use the standalone server agent so central outages and internet failures do not block or slow the DayZ process.
 
 ## Components
 
@@ -72,17 +79,31 @@ The server owns the authoritative game-side context:
 
 It performs only bounded current-world work. It does not scan every player pair every frame or calculate historical rankings.
 
+### Server agent
+
+The standalone server agent is the normal boundary for a DayZ server outside the central host. It:
+
+- listens only on loopback for the existing DayZ exporter;
+- authenticates and validates the local batch;
+- requires the batch `server_id` to match its configuration;
+- commits the batch to a bounded durable disk outbox before acknowledging DayZ;
+- imports the DayZ mod emergency spool when configured;
+- forwards the original batch to central `ingestd` over authenticated HTTPS;
+- retries transient failures and isolates permanent upstream rejections in a dead-letter directory.
+
+It performs no behavioural analysis and does not alter the telemetry payload.
+
 ### `ingestd`
 
-`ingestd` is the local HTTP receiver. It:
+`ingestd` is the central or same-host HTTP receiver. It:
 
-- authenticates the DayZ exporter;
+- authenticates the same-host DayZ exporter or remote server agent;
 - validates batch and event invariants;
 - persists each batch as an immutable, fsynced JSON file;
 - imports failed-export spool files;
 - rejects an existing batch identity when its contents differ.
 
-The DayZ query token is intended for a loopback or private sidecar boundary, not direct internet exposure.
+The DayZ query token is intended only for the loopback DayZ-to-agent or same-host boundary. Distributed agents use server-specific bearer credentials over HTTPS, and central ingest binds each credential to one configured `server_id`.
 
 ### `normalize`
 

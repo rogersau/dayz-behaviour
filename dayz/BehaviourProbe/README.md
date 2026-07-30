@@ -2,7 +2,7 @@
 
 This directory contains the client/server DayZ mod used by [DayZ Behaviour](../../README.md).
 
-The mod captures bounded game telemetry and sends it to the external Go ingest service. It does not analyze long-term player behaviour, assign review tiers, record raw audio, or perform enforcement inside DayZ.
+The mod captures bounded game telemetry and sends it to the local Go server agent or a same-host ingest service. It does not analyze long-term player behaviour, assign review tiers, record raw audio, or perform enforcement inside DayZ.
 
 ## Load both sides
 
@@ -117,6 +117,7 @@ Before using the new audio cues:
 
 ## Further documentation
 
+- [DayZ server agent](../../docs/server-agent.md)
 - [Deployment](../../docs/deployment.md)
 - [Architecture](../../docs/architecture.md)
 - [Analysis and review](../../docs/analysis-and-review.md)

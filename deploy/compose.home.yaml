@@ -1,0 +1,20 @@
+services:
+  ingestd:
+    environment:
+      DBA_QUERY_TOKEN: ""
+      DBA_SERVER_AUTH_FILE: /run/dayz-behaviour/server-auth.json
+    volumes:
+      - ${DBA_SERVER_AUTH_HOST_FILE:?set DBA_SERVER_AUTH_HOST_FILE}:/run/dayz-behaviour/server-auth.json:ro
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${DBA_CLOUDFLARE_TUNNEL_TOKEN:?set DBA_CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - ingestd
+      - reviewd
+    restart: unless-stopped

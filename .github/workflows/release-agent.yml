@@ -1,0 +1,250 @@
+name: Release Agent and Docker Images
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing SemVer tag to publish, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  CORE_IMAGE: ghcr.io/${{ github.repository }}
+  REVIEW_IMAGE: ghcr.io/${{ github.repository }}-review
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$DISPATCH_TAG"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be SemVer with a leading v, such as v0.1.0 or v0.1.0-rc.1." >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.metadata.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test with race detector
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build and package Windows agent
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          base="dayz-behaviour-agent_${VERSION}_windows_amd64"
+          package_dir="dist/package"
+          ldflags="-s -w -X github.com/rogersau/dayz-behaviour/internal/agent.Version=${VERSION}"
+
+          mkdir -p "$package_dir"
+
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="$ldflags" \
+            -o "$package_dir/dayz-behaviour-agent.exe" \
+            ./cmd/agentd
+
+          cp docs/server-agent.md "$package_dir/README.md"
+          cp LICENSE-NOTICE.md THIRD_PARTY_NOTICES.md "$package_dir/"
+          cp "$package_dir/dayz-behaviour-agent.exe" "dist/${base}.exe"
+
+          (
+            cd "$package_dir"
+            zip -9 -r "../${base}.zip" .
+          )
+
+          (
+            cd dist
+            sha256sum "${base}.exe" "${base}.zip" > "${base}_SHA256SUMS.txt"
+          )
+
+          go build \
+            -trimpath \
+            -ldflags="$ldflags" \
+            -o /tmp/dayz-behaviour-agent-version-check \
+            ./cmd/agentd
+
+          test "$(/tmp/dayz-behaviour-agent-version-check version)" = "$VERSION"
+
+          echo "RELEASE_BASE=$base" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Generate core image metadata
+        id: core_meta
+        uses: docker/metadata-action@v6
+        with:
+          context: git
+          images: ${{ env.CORE_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.metadata.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.metadata.outputs.tag }},enable=${{ steps.metadata.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ steps.metadata.outputs.prerelease == 'false' }}
+          labels: |
+            org.opencontainers.image.title=DayZ Behaviour Core
+            org.opencontainers.image.description=Central ingest, normalization, analysis, retention, and supporting Go commands for DayZ Behaviour.
+
+      - name: Generate review image metadata
+        id: review_meta
+        uses: docker/metadata-action@v6
+        with:
+          context: git
+          images: ${{ env.REVIEW_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.metadata.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.metadata.outputs.tag }},enable=${{ steps.metadata.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ steps.metadata.outputs.prerelease == 'false' }}
+          labels: |
+            org.opencontainers.image.title=DayZ Behaviour Review
+            org.opencontainers.image.description=DayZ Behaviour review service with bundled supported DayZ map assets.
+
+      - name: Build and publish central runtime image
+        id: core_image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: default
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          tags: ${{ steps.core_meta.outputs.tags }}
+          labels: ${{ steps.core_meta.outputs.labels }}
+          cache-from: type=gha,scope=release-core
+          cache-to: type=gha,mode=max,scope=release-core
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and publish review image
+        id: review_image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: review-runtime
+          platforms: linux/amd64
+          push: true
+          pull: true
+          tags: ${{ steps.review_meta.outputs.tags }}
+          labels: ${{ steps.review_meta.outputs.labels }}
+          cache-from: type=gha,scope=release-review
+          cache-to: type=gha,mode=max,scope=release-review
+          provenance: mode=max
+          sbom: true
+
+      - name: Summarize published images
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          CORE_DIGEST: ${{ steps.core_image.outputs.digest }}
+          REVIEW_DIGEST: ${{ steps.review_image.outputs.digest }}
+        run: |
+          {
+            echo "## Published container images"
+            echo
+            echo "- \`${CORE_IMAGE}:${VERSION}\` — \`${CORE_DIGEST}\`"
+            echo "- \`${REVIEW_IMAGE}:${VERSION}\` — \`${REVIEW_DIGEST}\`"
+            echo
+            echo "The core image supports Linux AMD64 and ARM64. The review image is Linux AMD64 because its pinned map-asset source is AMD64-only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          assets=(
+            "dist/${RELEASE_BASE}.exe"
+            "dist/${RELEASE_BASE}.zip"
+            "dist/${RELEASE_BASE}_SHA256SUMS.txt"
+          )
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            exit 0
+          fi
+
+          args=(
+            release create "$RELEASE_TAG"
+            "${assets[@]}"
+            --repo "$GITHUB_REPOSITORY"
+            --title "DayZ Behaviour ${RELEASE_TAG}"
+            --generate-notes
+            --verify-tag
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh "${args[@]}"
