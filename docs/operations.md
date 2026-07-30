@@ -5,16 +5,18 @@ This guide covers day-to-day operation after the stack and DayZ mod are deployed
 ## Operational boundaries
 
 - Keep `ingestd` and PostgreSQL on loopback or a private service network.
-- Use the DayZ query token only across the server-host sidecar boundary.
-- Expose only `reviewd` to administrators, through HTTPS.
-- Restrict raw telemetry, DayZ profiles, environment files, database backups, spool files, API output, and screenshots.
+- Use the DayZ query token only across the loopback DayZ-to-agent or same-host boundary.
+- Give every remote agent a separate upstream credential bound to one `server_id`.
+- Expose only the telemetry batch path and the authenticated review service through HTTPS.
+- Restrict agent configuration, outbox and dead-letter files, raw telemetry, DayZ profiles, environment files, database backups, spool files, API output, and screenshots.
 - No service sends enforcement commands to DayZ.
 
 ## Service responsibilities
 
 | Service/tool | Responsibility |
 |---|---|
-| `ingestd` | Authenticate, validate, and store raw batches; import spool files |
+| server agent | Authenticate the local DayZ exporter, durably queue batches, import the DayZ spool, and retry central delivery |
+| `ingestd` | Authenticate remote agents or a same-host exporter, validate batches, and store immutable raw data |
 | `normalize` | Convert raw batches into PostgreSQL records |
 | `analyse` | Produce features and review rankings |
 | `reviewd` | Serve evidence and record dispositions |
@@ -25,11 +27,15 @@ This guide covers day-to-day operation after the stack and DayZ mod are deployed
 
 After a restart or during routine operation, check:
 
+- deployed agent and image versions match the intended pinned release;
+- every agent service is running and its local status endpoint is healthy;
+- agent queue bytes and batches return towards zero after an outage;
+- agent upload success timestamps advance and dead letters remain zero;
 - collector health events continue arriving;
 - raw batch files are increasing under the expected server/session path;
 - `normalize` processes new batches;
-- `ingestd` has no repeated authentication, validation, conflict, or storage failures;
-- queues and spool files remain bounded;
+- `ingestd` has no repeated authentication, validation, conflict, capacity, or storage failures;
+- agent outboxes and DayZ spool files remain bounded;
 - dropped-event and dropped-opportunity counters are understood;
 - PostgreSQL and filesystem capacity remain healthy;
 - the explorer can list recent direct player sessions.
@@ -48,6 +54,20 @@ Before trusting analysis, confirm the selected data includes:
 Do not omit analyzer limitations when copying results into a ticket or case.
 
 ## Logs and health signals
+
+### Agent health
+
+The loopback agent status and metrics endpoints expose:
+
+- running version and configured `server_id`;
+- queued batch and byte totals;
+- configured queue limits;
+- uploaded batch and upload-failure totals;
+- last upload attempt and success timestamps;
+- the last upload error;
+- dead-letter count.
+
+A non-empty queue during a central outage is expected. A queue that never drains after connectivity returns, continuously increasing upload failures, a full outbox, or any dead letter requires investigation.
 
 ### Ingest health
 
@@ -87,33 +107,40 @@ Rejected clock responses may indicate an incompatible client, reconnect-state pr
 
 ## DayZ export spool
 
-When asynchronous HTTP export fails, the collector writes bounded NDJSON spool files in the DayZ profile area.
+When the DayZ mod cannot reach the local agent, it writes bounded NDJSON spool files in the DayZ profile area. This is the emergency layer behind the agent's own durable outbox.
 
-The importer:
+The agent importer:
 
 1. waits for a file to become stable;
 2. atomically claims it;
 3. validates every batch;
-4. stores batches idempotently;
+4. stores batches idempotently in the agent outbox;
 5. archives the imported file;
 6. restores the original name when import fails.
 
 Recovery procedure:
 
-1. restore `ingestd` connectivity and authentication;
-2. confirm the spool directory is mounted or copied to the importer path;
-3. watch logs for imported files, batches, and duplicates;
-4. confirm recovered raw files exist;
-5. confirm `normalize` processes them;
-6. retain malformed spool files for investigation.
+1. restore the local agent service and its loopback listener;
+2. confirm the configured DayZ spool directory is correct and accessible to the service account;
+3. watch agent logs for imported files, batches, and duplicates;
+4. confirm the agent queue accepts and forwards the recovered batches;
+5. confirm central raw files appear and `normalize` processes them;
+6. retain malformed spool and dead-letter files for investigation.
 
 A rising spool-overwrite count means data was lost after the bounded spool filled. Record the period and treat analysis coverage as incomplete.
 
 ## Data locations
 
-Compose volumes:
+Agent directory:
 
-- `telemetry-data` — raw batches and imported spool area;
+- `dayz-behaviour-agent.json` — local and upstream credentials plus queue settings;
+- `data/outbox` — accepted batches waiting for central acknowledgement;
+- `data/dead-letter` — permanently rejected batches and reason metadata;
+- the configured DayZ profile spool — emergency batches created when the local agent is unavailable.
+
+Central Compose volumes:
+
+- `telemetry-data` — immutable raw batches and central spool import area;
 - `postgres-data` — PostgreSQL cluster.
 
 Raw layout:
@@ -150,6 +177,8 @@ There is no pseudonym mode, identity policy table, compatibility alias, or ident
 
 Protect:
 
+- agent configuration, outbox, dead-letter, and DayZ spool files;
+- central raw telemetry;
 - PostgreSQL access;
 - review API responses;
 - explorer exports and screenshots;
@@ -200,7 +229,9 @@ A usable plan includes:
 
 - filesystem-consistent raw-data copies or snapshots;
 - PostgreSQL logical or physical backups;
-- deployment and collector configuration;
+- central deployment configuration and exact image tags/digests;
+- protected server credential maps and agent configurations;
+- collector configuration;
 - administrator-entered review dispositions;
 - documented restoration tests;
 - the same retention and deletion obligations as live data.
@@ -252,13 +283,15 @@ Keep the browser-session secret, API token, and Steam allowlist independent.
 
 For remote access:
 
-- terminate TLS at a trusted reverse proxy;
-- set `DBA_PUBLIC_BASE_URL` to the exact external HTTPS origin;
+- terminate TLS at Cloudflare Tunnel or another trusted reverse proxy;
+- expose the ingest hostname only for `POST /v1/telemetry/batches`;
+- authenticate each agent with its own credential bound to one `server_id`;
+- set `DBA_PUBLIC_BASE_URL` to the exact external review origin;
 - preserve forwarded host and scheme;
-- use firewall, VPN, or identity-aware proxy controls where practical;
+- protect the review hostname with Steam authorization plus an identity-aware proxy, VPN, or firewall controls where practical;
 - avoid caching authenticated API, map, and timeline responses.
 
-Do not expose the query-token ingest endpoint to the internet. If ingest crosses hosts, use a private authenticated tunnel or mTLS boundary.
+Do not expose the DayZ query-token endpoint to the internet. The query token is only for loopback. A distributed agent sends to central ingest over HTTPS using the server-specific upstream credential.
 
 ## Map operations
 
@@ -290,6 +323,8 @@ go run ./cmd/retention -raw-dir ./data/raw -execute
 
 Record the command, operator, approval, counts, and result. External backups and exports need equivalent retention handling.
 
+The central retention tool does not manage remote agent outboxes, dead-letter files, archived DayZ spool files, or copied agent directories. Include those locations in operational retention and deletion procedures. Healthy outbox files should be transient; dead letters require investigation before removal.
+
 ## Player deletion
 
 Deletion matches a player when they are:
@@ -320,7 +355,7 @@ go run ./cmd/privacy-delete `
 
 Execution deletes or rewrites matching raw batches, removes normalized and review references, updates raw metadata, and writes an audit record containing the direct `subject_player_id` and affected counts.
 
-The command cannot erase snapshots, copied directories, exported reports, or ticket attachments. Locate and handle those separately.
+The command cannot erase remote agent outboxes, dead-letter files, DayZ spool archives, snapshots, copied directories, exported reports, or ticket attachments. Locate and handle those separately. Stop or isolate affected agents before deletion when they may still hold queued copies for the subject.
 
 ## Review-case handling
 
@@ -333,29 +368,51 @@ The command cannot erase snapshots, copied directories, exported reports, or tic
 
 ## Updating software
 
+Use exact release versions for both central images and the Windows agents. Record image digests and agent versions with the change record. See [Releases and published images](releases.md) for the complete upgrade and rollback procedure.
+
 Before updating:
 
-1. back up raw and PostgreSQL data;
-2. record the current commit, DayZ build, mod set, schema, sampling, visibility, and audio model versions;
-3. review migration and configuration changes;
-4. test representative data;
-5. repack/re-sign the mod when scripts change;
-6. schedule validation for changed DayZ callbacks, audio, or visibility behaviour.
+1. back up raw telemetry, PostgreSQL, deployment configuration, and the server credential map;
+2. record the current release tags, image digests, agent versions, DayZ build, mod set, schema, sampling, visibility, and audio model versions;
+3. review migration, configuration, collector, and transport changes;
+4. test representative data and restoration procedures;
+5. retain the previous agent ZIP and exact image tags;
+6. repack/re-sign the mod when scripts change;
+7. schedule validation for changed DayZ callbacks, audio, or visibility behaviour.
+
+Roll out in this order:
+
+1. pull the new central and review images;
+2. update central `ingestd`, `normalize`, and `reviewd` together;
+3. confirm migrations and central health;
+4. update one agent and confirm its queue drains;
+5. continue agent by agent;
+6. resume scheduled analysis after the collection path is stable.
 
 After updating:
 
-1. confirm migrations complete;
-2. verify ingest, normalization, login, timelines, and maps;
+1. verify ingest, normalization, login, timelines, and maps;
+2. verify agent versions, queue depth, upload success, and zero dead letters;
 3. verify lifecycle and client RPC events;
 4. compare health/drop counters;
 5. replay a known fixture;
 6. document result changes caused by new policies.
 
+Do not roll back across a destructive database migration without restoring a compatible backup.
+
 ## Troubleshooting
 
 ### No raw files
 
-Check mod loading, `enabled`, endpoint trailing `/`, token match, `ingestd` listener, connectivity, rejection logs, and DayZ spool files.
+Check mod loading, `enabled`, the loopback endpoint trailing `/`, the local token match, agent service state, agent status, queue depth, upstream HTTPS connectivity, central credential-map membership, `server_id` agreement, central rejection logs, and DayZ spool files.
+
+### Agent queue does not drain
+
+Check the public ingest hostname, Tunnel health, TLS and DNS, the upstream credential, the claimed `server_id`, central capacity, and the last agent upload error. HTTP 5xx and network failures should retry; permanent 4xx rejections move the batch to dead letter.
+
+### Agent has dead letters
+
+Preserve the batch and reason metadata. Check schema compatibility, batch identity conflicts, request size, and whether the agent and central services use the intended matching release. Do not delete the evidence until the rejection is understood.
 
 ### Raw files but empty explorer
 
@@ -382,9 +439,11 @@ Inspect matched-model convergence, useful strata, odds-ratio lower bound, sessio
 Treat these as incidents:
 
 - batch identity conflicts;
-- unauthorized access or leaked credentials;
+- unauthorized access or leaked local, agent, Tunnel, review, or database credentials;
+- an agent credential accepted for the wrong `server_id`;
 - player data exposed outside the admin boundary;
-- sustained spool overwrites;
+- a full agent outbox, unexplained dead letters, or sustained DayZ spool overwrites;
+- unexpected agent or central image versions/digests;
 - migration checksum mismatch;
 - incorrect map substitution;
 - evidence used for automatic enforcement;

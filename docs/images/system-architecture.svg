@@ -1,1 +1,94 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc"><title id="title">System Architecture</title><desc id="desc">DayZ telemetry flows through collection, ingest, storage, analysis and review.</desc><defs><filter id="s"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0b1f44" flood-opacity=".1"/></filter><style>.t{font:700 68px Arial;fill:#071b48}.st{font:31px Arial;fill:#53698f}.c{fill:#fff;stroke:#dce7f7;stroke-width:2}.n{fill:#1764d8}.nt{font:700 28px Arial;fill:#fff;text-anchor:middle}.h{font:700 31px Arial;fill:#071b48;text-anchor:middle}.b{font:24px Arial;fill:#223657;text-anchor:middle}.a{fill:#1764d8}.tag{font:700 29px Arial;fill:#071b48}</style></defs><rect width="1600" height="900" fill="#fff"/><text x="800" y="88" class="t" text-anchor="middle">System Architecture</text><text x="800" y="140" class="st" text-anchor="middle">From DayZ telemetry to human review.</text><g filter="url(#s)"><g transform="translate(35 205)"><rect class="c" width="225" height="455" rx="26"/><circle class="n" cx="112" cy="52" r="31"/><text class="nt" x="112" y="62">1</text><text class="h" x="112" y="118">DayZ Server</text><rect x="55" y="190" width="115" height="80" rx="10" fill="#263d67"/><rect x="69" y="174" width="87" height="27" rx="9" fill="#63779d"/><text class="b" x="112" y="390"><tspan x="112">Positions, shots,</tspan><tspan x="112" dy="32">actions</tspan></text></g><g transform="translate(300 205)"><rect class="c" width="225" height="455" rx="26"/><circle class="n" cx="112" cy="52" r="31"/><text class="nt" x="112" y="62">2</text><text class="h" x="112" y="118">Collector Mod</text><rect x="60" y="180" width="105" height="105" rx="16" fill="#2d496e" stroke="#071b48" stroke-width="7"/><path d="M78 240h20l10-25 16 47 12-30h20" fill="none" stroke="#42c6be" stroke-width="7"/><text class="b" x="112" y="390"><tspan x="112">Captures bounded</tspan><tspan x="112" dy="32">gameplay events</tspan></text></g><g transform="translate(565 205)"><rect class="c" width="225" height="455" rx="26"/><circle class="n" cx="112" cy="52" r="31"/><text class="nt" x="112" y="62">3</text><text class="h" x="112" y="118">Ingest</text><path d="M55 245q-4-42 33-49 17-33 51-12 32-9 47 23 31 0 31 35 0 30-31 33H63Q29 274 29 245q0-20 26-28" fill="#92ddd5" stroke="#247f86" stroke-width="6"/><path d="M123 275v-55M98 244l25-25 25 25" fill="none" stroke="#1764d8" stroke-width="9" stroke-linecap="round"/><text class="b" x="112" y="390"><tspan x="112">Receives and validates</tspan><tspan x="112" dy="32">telemetry</tspan></text></g><g transform="translate(830 205)"><rect class="c" width="225" height="455" rx="26"/><circle class="n" cx="112" cy="52" r="31"/><text class="nt" x="112" y="62">4</text><text class="h" x="112" y="118">Storage</text><ellipse cx="112" cy="190" rx="62" ry="22" fill="#7589aa" stroke="#243757" stroke-width="6"/><rect x="50" y="190" width="124" height="105" fill="#526b93" stroke="#243757" stroke-width="6"/><ellipse cx="112" cy="295" rx="62" ry="22" fill="#526b93" stroke="#243757" stroke-width="6"/><text class="b" x="112" y="390"><tspan x="112">Raw files and</tspan><tspan x="112" dy="32">PostgreSQL</tspan></text></g><g transform="translate(1095 205)"><rect class="c" width="225" height="455" rx="26"/><circle class="n" cx="112" cy="52" r="31"/><text class="nt" x="112" y="62">5</text><text class="h" x="112" y="118">Analysis</text><circle cx="105" cy="225" r="62" fill="#83d8cf" stroke="#247f86" stroke-width="6"/><circle cx="145" cy="255" r="36" fill="#fff" stroke="#071b48" stroke-width="6"/><path d="M170 280l30 30" stroke="#071b48" stroke-width="11" stroke-linecap="round"/><text class="b" x="112" y="390"><tspan x="112">Builds evidence and</tspan><tspan x="112" dy="32">review priority</tspan></text></g><g transform="translate(1360 205)"><rect class="c" width="205" height="455" rx="26"/><circle class="n" cx="102" cy="52" r="31"/><text class="nt" x="102" y="62">6</text><text class="h" x="102" y="118">Review UI</text><circle cx="65" cy="215" r="30" fill="#344969"/><path d="M25 300q0-55 40-55t40 55z" fill="#344969"/><rect x="105" y="190" width="78" height="80" rx="8" fill="#fff" stroke="#243757" stroke-width="7"/><text class="b" x="102" y="390"><tspan x="102">Admins inspect</tspan><tspan x="102" dy="32">cases</tspan></text></g></g><path class="a" d="M267 414h25l-14-14 9-9 31 31-31 31-9-9 14-14h-25zM532 414h25l-14-14 9-9 31 31-31 31-9-9 14-14h-25zM797 414h25l-14-14 9-9 31 31-31 31-9-9 14-14h-25zM1062 414h25l-14-14 9-9 31 31-31 31-9-9 14-14h-25zM1327 414h25l-14-14 9-9 31 31-31 31-9-9 14-14h-25z"/><g transform="translate(165 765)"><rect width="370" height="82" rx="24" fill="#effaf8" stroke="#b8e6df" stroke-width="2"/><text x="185" y="52" class="tag" text-anchor="middle">No raw audio</text></g><g transform="translate(615 765)"><rect width="370" height="82" rx="24" fill="#f4f8ff" stroke="#c8dbfa" stroke-width="2"/><text x="185" y="52" class="tag" text-anchor="middle">Direct player IDs</text></g><g transform="translate(1065 765)"><rect width="370" height="82" rx="24" fill="#f7f3ff" stroke="#ddd0fb" stroke-width="2"/><text x="185" y="52" class="tag" text-anchor="middle">Human review</text></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="900" viewBox="0 0 1800 900" role="img" aria-labelledby="title desc">
+  <title id="title">DayZ Behaviour system architecture</title>
+  <desc id="desc">DayZ telemetry flows from the collector mod through a loopback server agent and authenticated HTTPS tunnel to central ingest, storage, analysis, and human review.</desc>
+  <defs>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0b1f44" flood-opacity=".10"/></filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0l12 6-12 6z" fill="#1764d8"/></marker>
+    <style>
+      .title{font:700 64px Arial,sans-serif;fill:#071b48;text-anchor:middle}
+      .subtitle{font:30px Arial,sans-serif;fill:#53698f;text-anchor:middle}
+      .card{fill:#fff;stroke:#dce7f7;stroke-width:2}
+      .number{fill:#1764d8}
+      .numberText{font:700 25px Arial,sans-serif;fill:#fff;text-anchor:middle}
+      .heading{font:700 27px Arial,sans-serif;fill:#071b48;text-anchor:middle}
+      .body{font:22px Arial,sans-serif;fill:#223657;text-anchor:middle}
+      .flow{fill:none;stroke:#1764d8;stroke-width:8;stroke-linecap:round;marker-end:url(#arrow)}
+      .tag{font:700 26px Arial,sans-serif;fill:#071b48;text-anchor:middle}
+    </style>
+  </defs>
+  <rect width="1800" height="900" fill="#fff"/>
+  <text x="900" y="82" class="title">System Architecture</text>
+  <text x="900" y="132" class="subtitle">Bounded DayZ collection, durable delivery, central analysis, and human review.</text>
+
+  <g filter="url(#shadow)">
+    <g transform="translate(35 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">1</text>
+      <text class="heading" x="105" y="115">DayZ Server</text>
+      <rect x="52" y="180" width="106" height="88" rx="12" fill="#263d67"/><rect x="66" y="164" width="78" height="26" rx="8" fill="#63779d"/>
+      <text class="body" x="105" y="365"><tspan x="105">Authoritative game</tspan><tspan x="105" dy="30">state and identity</tspan></text>
+    </g>
+
+    <g transform="translate(280 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">2</text>
+      <text class="heading" x="105" y="115">Collector Mod</text>
+      <rect x="54" y="176" width="102" height="102" rx="16" fill="#2d496e" stroke="#071b48" stroke-width="6"/>
+      <path d="M72 234h18l10-24 15 45 12-28h16" fill="none" stroke="#42c6be" stroke-width="7"/>
+      <text class="body" x="105" y="365"><tspan x="105">Captures bounded</tspan><tspan x="105" dy="30">telemetry</tspan></text>
+    </g>
+
+    <g transform="translate(525 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">3</text>
+      <text class="heading" x="105" y="115">Local Agent</text>
+      <rect x="48" y="177" width="114" height="96" rx="14" fill="#effaf8" stroke="#247f86" stroke-width="6"/>
+      <path d="M68 209h74M68 229h74M68 249h50" stroke="#247f86" stroke-width="7" stroke-linecap="round"/>
+      <text class="body" x="105" y="350"><tspan x="105">Durable outbox</tspan><tspan x="105" dy="30">and retries</tspan><tspan x="105" dy="30">on localhost</tspan></text>
+    </g>
+
+    <g transform="translate(770 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">4</text>
+      <text class="heading" x="105" y="115">Central Ingest</text>
+      <path d="M48 239q-4-39 30-46 16-31 48-11 30-8 44 22 29 0 29 32 0 29-29 32H56q-31 0-31-28 0-19 23-27" fill="#92ddd5" stroke="#247f86" stroke-width="6"/>
+      <path d="M105 270v-52M82 241l23-23 23 23" fill="none" stroke="#1764d8" stroke-width="8" stroke-linecap="round"/>
+      <text class="body" x="105" y="350"><tspan x="105">HTTPS through</tspan><tspan x="105" dy="30">Tunnel, auth,</tspan><tspan x="105" dy="30">and validation</tspan></text>
+    </g>
+
+    <g transform="translate(1015 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">5</text>
+      <text class="heading" x="105" y="115">Storage</text>
+      <ellipse cx="105" cy="184" rx="58" ry="20" fill="#7589aa" stroke="#243757" stroke-width="6"/>
+      <rect x="47" y="184" width="116" height="100" fill="#526b93" stroke="#243757" stroke-width="6"/>
+      <ellipse cx="105" cy="284" rx="58" ry="20" fill="#526b93" stroke="#243757" stroke-width="6"/>
+      <text class="body" x="105" y="365"><tspan x="105">Immutable raw files</tspan><tspan x="105" dy="30">and PostgreSQL</tspan></text>
+    </g>
+
+    <g transform="translate(1260 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">6</text>
+      <text class="heading" x="105" y="115">Analysis</text>
+      <circle cx="94" cy="220" r="55" fill="#83d8cf" stroke="#247f86" stroke-width="6"/>
+      <circle cx="132" cy="252" r="32" fill="#fff" stroke="#071b48" stroke-width="6"/>
+      <path d="M154 274l27 27" stroke="#071b48" stroke-width="10" stroke-linecap="round"/>
+      <text class="body" x="105" y="365"><tspan x="105">Builds evidence and</tspan><tspan x="105" dy="30">review priority</tspan></text>
+    </g>
+
+    <g transform="translate(1505 205)">
+      <rect class="card" width="210" height="455" rx="26"/>
+      <circle class="number" cx="105" cy="50" r="29"/><text class="numberText" x="105" y="59">7</text>
+      <text class="heading" x="105" y="115">Review UI</text>
+      <circle cx="70" cy="214" r="28" fill="#344969"/><path d="M32 296q0-52 38-52t38 52z" fill="#344969"/>
+      <rect x="108" y="186" width="70" height="78" rx="8" fill="#fff" stroke="#243757" stroke-width="6"/>
+      <text class="body" x="105" y="365"><tspan x="105">Admins inspect</tspan><tspan x="105" dy="30">explainable cases</tspan></text>
+    </g>
+  </g>
+
+  <path class="flow" d="M250 430H270"/><path class="flow" d="M495 430H515"/><path class="flow" d="M740 430H760"/><path class="flow" d="M985 430H1005"/><path class="flow" d="M1230 430H1250"/><path class="flow" d="M1475 430H1495"/>
+
+  <g transform="translate(180 755)"><rect width="360" height="80" rx="23" fill="#effaf8" stroke="#b8e6df" stroke-width="2"/><text x="180" y="50" class="tag">Loopback DayZ token</text></g>
+  <g transform="translate(720 755)"><rect width="360" height="80" rx="23" fill="#f4f8ff" stroke="#c8dbfa" stroke-width="2"/><text x="180" y="50" class="tag">Durable outage recovery</text></g>
+  <g transform="translate(1260 755)"><rect width="360" height="80" rx="23" fill="#f7f3ff" stroke="#ddd0fb" stroke-width="2"/><text x="180" y="50" class="tag">Human review only</text></g>
+</svg>

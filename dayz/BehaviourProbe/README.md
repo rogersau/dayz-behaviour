@@ -30,14 +30,14 @@ Set at least:
   "enabled": true,
   "server_id": "your-server-name",
   "endpoint": "http://127.0.0.1:8080/",
-  "ingest_token": "same-value-as-DBA_QUERY_TOKEN",
+  "ingest_token": [REDACTED_SECRET],
   "configuration_hash": "your-versioned-config-id"
 }
 ```
 
 The endpoint must end with `/`.
 
-`ingest_token` is sent as a query parameter because DayZ `RestContext` does not expose a general arbitrary-header setter. Keep the receiver on loopback or behind an equivalent private sidecar boundary. Do not expose this transport directly to the internet.
+`ingest_token` is sent as a query parameter because DayZ `RestContext` does not expose a general arbitrary-header setter. Keep this connection on loopback between the DayZ server and the standalone agent, or between DayZ and same-host `ingestd` for evaluation. Do not expose the query-token transport directly to the internet.
 
 ## Collection behaviour
 
@@ -54,7 +54,7 @@ The mod captures:
 - client/server clock alignment;
 - collector, queue, export, and spool health.
 
-Failed asynchronous exports are written to bounded NDJSON spool files for later import by `ingestd`.
+Failed asynchronous exports are written to bounded NDJSON spool files. In a distributed deployment the local agent imports them into its durable outbox; same-host evaluation deployments may import them through `ingestd`.
 
 ## Audio opportunity settings
 
@@ -118,6 +118,7 @@ Before using the new audio cues:
 ## Further documentation
 
 - [DayZ server agent](../../docs/server-agent.md)
+- [Releases and published images](../../docs/releases.md)
 - [Deployment](../../docs/deployment.md)
 - [Architecture](../../docs/architecture.md)
 - [Analysis and review](../../docs/analysis-and-review.md)
